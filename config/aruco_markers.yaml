@@ -1,0 +1,258 @@
+/**:
+  ros__parameters:
+    aruco_marker_info:
+      '1':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhitePawn1'
+        link: 'None'
+      '2':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhiteBishop1'
+        link: 'None'
+      '3':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackPawn1'
+        link: 'None'
+      '4':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackPawn2'
+        link: 'None'
+      '5':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackPawn3'
+        link: 'None'
+      '6':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackPawn4'
+        link: 'None'
+      '7':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhiteRook1'
+        link: 'None'
+      '8':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackBishop1'
+        link: 'None'
+      '9':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackPawn5'
+        link: 'None'
+      '10':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhitePawn2'
+        link: 'None'
+      '11':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhiteQueen1'
+        link: 'None'
+      '12':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackRook1'
+        link: 'None'
+      '13':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackPawn6'
+        link: 'None'
+      '14':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackBishop2'
+        link: 'None'
+      '15':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackQueen1'
+        link: 'None'
+      '16':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackKing1'
+        link: 'None'
+      '17':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhitePawn3'
+        link: 'None'
+      '18':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhitePawn4'
+        link: 'None'
+      '19':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhiteKnight1'
+        link: 'None'
+      '20':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhiteKing1'
+        link: 'None'
+      '21':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhiteBishop2'
+        link: 'None'
+      '22':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhiteRook2'
+        link: 'None'
+      '23':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackKnight1'
+        link: 'None'
+      '24':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackKnight2'
+        link: 'None'
+      '25':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhitePawn5'
+        link: 'None'
+      '26':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackPawn7'
+        link: 'None'
+      '27':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhitePawn6'
+        link: 'None'
+      '28':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackPawn8'
+        link: 'None'
+      '29':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackRook2'
+        link: 'None'
+      '30':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhitePawn7'
+        link: 'None'
+      '31':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhitePawn8'
+        link: 'None'
+      '32':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhiteKnight2'
+        link: 'None'
+      '33':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'FileA'
+        link: 'None'
+      '34':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'FileB'
+        link: 'None'
+      '35':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'FileC'
+        link: 'None'
+      '36':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'FileD'
+        link: 'None'
+      '37':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'FileE'
+        link: 'None'
+      '38':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'FileF'
+        link: 'None'
+      '39':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'FileG'
+        link: 'None'
+      '40':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'FileH'
+        link: 'None'
+      '41':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'Rank1'
+        link: 'None'
+      '42':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'Rank2'
+        link: 'None'
+      '43':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'Rank3'
+        link: 'None'
+      '44':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'Rank4'
+        link: 'None'
+      '45':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'Rank5'
+        link: 'None'
+      '46':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'Rank6'
+        link: 'None'
+      '47':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'Rank7'
+        link: 'None'
+      '48':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'Rank8'
+        link: 'None'
+      '49':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhitePromo'
+        link: 'None'
+      '50':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackPromo'
+        link: 'None'
+      'default':
+        length_mm: 24
+        use_rgb_only: False
+        name: 'unknown'
+        link: 'None'

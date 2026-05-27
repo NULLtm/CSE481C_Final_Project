@@ -1,0 +1,16 @@
+# Python bytecode/caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Build and metadata directories
+cls/
+build/
+dist/
+*.egg-info/
+
+# OS specific files
+.DS_Store
+
