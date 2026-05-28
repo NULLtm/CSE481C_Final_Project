@@ -4,7 +4,7 @@
   <name>aaso_final_project</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
-  <maintainer email="dvarad2607@gmail.com">hello-robot</maintainer>
+  <maintainer email="nulltm@uw.edu">Owen Boseley</maintainer>
   <license>TODO: License declaration</license>
 
   <depend>rclpy</depend>

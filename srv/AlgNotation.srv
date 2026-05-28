@@ -1,0 +1,5 @@
+# Request (Client -> Server)
+string pos
+---
+# Response (Server -> Client)
+string pos
