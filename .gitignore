@@ -1,12 +1,16 @@
-# ROS 2 build artifacts
-install/
-build/
-log/
+# Ignore build, install, and log directories at any level
+**/build/
+**/install/
+**/log/
 
-# Python compiled files
-__pycache__/
+# Also ignore individual package-level artifacts if they exist
+**/build_*
+**/install_*
+
+# Python and system files
+**/__pycache__/
 *.pyc
 
-# IDE/Editor specific files (Optional, but recommended)
+# IDE configurations
 .vscode/
 .idea/
