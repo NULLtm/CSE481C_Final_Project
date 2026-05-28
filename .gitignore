@@ -1,16 +1,12 @@
-# Python bytecode/caches
+# ROS 2 build artifacts
+install/
+build/
+log/
+
+# Python compiled files
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-.pytest_cache/
 
-# Build and metadata directories
-cls/
-build/
-dist/
-*.egg-info/
-
-# OS specific files
-.DS_Store
-
+# IDE/Editor specific files (Optional, but recommended)
+.vscode/
+.idea/
