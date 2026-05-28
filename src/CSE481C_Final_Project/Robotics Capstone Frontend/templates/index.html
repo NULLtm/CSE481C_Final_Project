@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Robotic Chess — Tablet Interface</title>
+
+  <link rel="stylesheet"
+        href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css"
+        crossorigin="anonymous" />
+
+  <!-- chess.js — client-side move generation for legal-move highlighting -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"
+          crossorigin="anonymous"></script>
+
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* Reset & Base                                                         */
+    /* ------------------------------------------------------------------ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #1a1a2e;
+      --surface:      #16213e;
+      --accent:       #0f3460;
+      --highlight:    #e94560;
+      --voice-color:  #7c3aed;
+      --voice-light:  #a78bfa;
+      --select-color: #0f3460;
+      --text-primary: #eaeaea;
+      --text-muted:   #a0a0b0;
+      --radius:       12px;
+      --shadow:       0 8px 32px rgba(0, 0, 0, 0.5);
+      --board-max:    min(90vw, 600px);
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text-primary);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 16px;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Layout                                                              */
+    /* ------------------------------------------------------------------ */
+    .page-wrapper {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 24px 16px 40px;
+      gap: 20px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Header                                                              */
+    /* ------------------------------------------------------------------ */
+    header {
+      text-align: center;
+      width: 100%;
+      max-width: 660px;
+    }
+
+    header h1 {
+      font-size: clamp(1.4rem, 4vw, 2rem);
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+
+    #modeSubtitle {
+      margin-top: 4px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      transition: color 0.3s;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Status Pill                                                         */
+    /* ------------------------------------------------------------------ */
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .status-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #555;
+      flex-shrink: 0;
+      transition: background 0.4s;
+    }
+
+    .status-dot.connected    { background: #4caf50; }
+    .status-dot.disconnected { background: var(--highlight); }
+    .status-dot.pending      { background: #ff9800; animation: blink 1s infinite; }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Mode Toggle                                                         */
+    /* ------------------------------------------------------------------ */
+    .mode-toggle {
+      display: flex;
+      background: var(--surface);
+      border-radius: 50px;
+      padding: 4px;
+      gap: 4px;
+      box-shadow: var(--shadow);
+      width: 100%;
+      max-width: 380px;
+    }
+
+    .mode-btn {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 20px;
+      border: none;
+      border-radius: 50px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      color: var(--text-muted);
+      background: transparent;
+      transition: background 0.25s, color 0.25s, transform 0.1s;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    .mode-btn:active { transform: scale(0.97); }
+
+    .mode-btn.active[data-mode="select"] {
+      background: var(--select-color);
+      color: var(--text-primary);
+      box-shadow: 0 2px 10px rgba(15, 52, 96, 0.6);
+    }
+
+    .mode-btn.active[data-mode="voice"] {
+      background: var(--voice-color);
+      color: #fff;
+      box-shadow: 0 2px 10px rgba(124, 58, 237, 0.6);
+    }
+
+    .mode-icon { font-size: 1.1rem; line-height: 1; }
+
+    /* ------------------------------------------------------------------ */
+    /* Board Container                                                     */
+    /* ------------------------------------------------------------------ */
+    .board-card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 20px;
+      width: 100%;
+      max-width: calc(var(--board-max) + 40px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    #board {
+      width: var(--board-max);
+      touch-action: none;
+    }
+
+    /* Ensure [hidden] is never overridden by explicit display rules */
+    [hidden] { display: none !important; }
+
+    /* Selected & valid-move square highlights (layered via ::after on the square) */
+    /* position:relative is required so ::after inset:0 is relative to the square */
+    [data-square] { position: relative; }
+
+    [data-square].sq-selected::after,
+    [data-square].sq-valid::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      border-radius: 3px;
+    }
+
+    [data-square].sq-selected::after {
+      background: rgba(255, 215, 0, 0.45);
+      box-shadow: inset 0 0 0 3px rgba(255, 200, 0, 0.9);
+    }
+
+    [data-square].sq-valid::after {
+      background: rgba(100, 220, 100, 0.30);
+      box-shadow: inset 0 0 0 3px rgba(80, 200, 80, 0.8);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Turn & Info Strip                                                   */
+    /* ------------------------------------------------------------------ */
+    .info-strip {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 4px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .turn-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .turn-swatch {
+      width: 18px; height: 18px;
+      border-radius: 4px;
+      border: 2px solid rgba(255,255,255,0.2);
+      background: #f0d9b5;
+      transition: background 0.3s;
+    }
+
+    .turn-swatch.black { background: #333; }
+
+    /* ------------------------------------------------------------------ */
+    /* Voice Panel                                                         */
+    /* ------------------------------------------------------------------ */
+    .voice-panel {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      padding: 4px 0;
+    }
+
+    .mic-btn {
+      width: 90px; height: 90px;
+      border-radius: 50%;
+      border: none;
+      background: var(--voice-color);
+      color: #fff;
+      font-size: 2.2rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 20px rgba(124, 58, 237, 0.5);
+      transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      position: relative;
+    }
+
+    .mic-btn:active { transform: scale(0.94); }
+
+    .mic-btn.listening {
+      background: var(--highlight);
+      box-shadow: 0 4px 24px rgba(233, 69, 96, 0.6);
+      animation: mic-pulse 1.2s ease-in-out infinite;
+    }
+
+    .mic-btn.processing {
+      background: #ff9800;
+      box-shadow: 0 4px 20px rgba(255, 152, 0, 0.5);
+    }
+
+    @keyframes mic-pulse {
+      0%, 100% { box-shadow: 0 4px 24px rgba(233, 69, 96, 0.6); transform: scale(1); }
+      50%       { box-shadow: 0 4px 40px rgba(233, 69, 96, 0.9); transform: scale(1.06); }
+    }
+
+    .mic-label {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      text-align: center;
+      letter-spacing: 0.04em;
+    }
+
+    .transcript-box {
+      width: 100%;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 12px 16px;
+      min-height: 52px;
+      font-size: 0.9rem;
+      color: var(--text-primary);
+      text-align: center;
+      line-height: 1.5;
+    }
+
+    .transcript-box .heard-text  { color: var(--voice-light); font-style: italic; }
+    .transcript-box .hint-text   { color: var(--text-muted); }
+    .transcript-box .parsed-move { color: #4caf50; font-weight: 700; }
+    .transcript-box .error-text  { color: var(--highlight); }
+
+    /* ------------------------------------------------------------------ */
+    /* Select Panel hint                                                   */
+    /* ------------------------------------------------------------------ */
+    .select-hint {
+      width: 100%;
+      text-align: center;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      padding: 4px 0;
+      min-height: 22px;
+      transition: color 0.2s;
+    }
+
+    .select-hint.active { color: #ffd700; font-weight: 600; }
+
+    /* ------------------------------------------------------------------ */
+    /* Controls                                                            */
+    /* ------------------------------------------------------------------ */
+    .controls {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    button.std-btn {
+      padding: 12px 28px;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.1s, opacity 0.2s;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    button.std-btn:active { transform: scale(0.96); }
+
+    .btn-primary   { background: var(--highlight); color: #fff; }
+    .btn-secondary { background: var(--accent);    color: var(--text-primary); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ------------------------------------------------------------------ */
+    /* Move Log                                                            */
+    /* ------------------------------------------------------------------ */
+    .move-log-section {
+      width: 100%;
+      max-width: calc(var(--board-max) + 40px);
+    }
+
+    .move-log-section h2 {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    #moveLog {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      min-height: 64px;
+      max-height: 140px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      line-height: 1.7;
+      box-shadow: var(--shadow);
+    }
+
+    #moveLog .move-entry         { color: var(--text-primary); }
+    #moveLog .move-entry.event   { color: #4caf50; font-style: italic; }
+
+    /* ------------------------------------------------------------------ */
+    /* Responsive                                                          */
+    /* ------------------------------------------------------------------ */
+    @media (max-width: 400px) {
+      header h1 { font-size: 1.2rem; }
+      button.std-btn { padding: 10px 18px; font-size: 0.82rem; }
+      .mode-btn { font-size: 0.82rem; padding: 10px 14px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="page-wrapper">
+
+  <!-- Header -->
+  <header>
+    <h1>Robotic Chess</h1>
+    <p id="modeSubtitle">Tap a piece, then tap its destination.</p>
+  </header>
+
+  <!-- Connection status -->
+  <div class="status-row">
+    <div class="status-dot pending" id="statusDot"></div>
+    <span id="statusText">Connecting…</span>
+  </div>
+
+  <!-- Mode Toggle -->
+  <div class="mode-toggle" role="group" aria-label="Input mode">
+    <button class="mode-btn active" data-mode="select" id="modeSelectBtn">
+      <span class="mode-icon">&#9610;</span> Select Piece
+    </button>
+    <button class="mode-btn" data-mode="voice" id="modeVoiceBtn">
+      <span class="mode-icon">&#127908;</span> Voice Command
+    </button>
+  </div>
+
+  <!-- Board card -->
+  <div class="board-card">
+
+    <!-- Chess board -->
+    <div id="board"></div>
+
+    <!-- Select-piece mode hint (shown in select mode) -->
+    <div class="select-hint" id="selectHint">Tap a piece to select it.</div>
+
+    <!-- Voice panel (shown in voice mode) -->
+    <div class="voice-panel" id="voicePanel" hidden>
+      <button class="mic-btn" id="micBtn" aria-label="Hold to speak your move">
+        &#127908;
+      </button>
+      <span class="mic-label" id="micLabel">TAP TO SPEAK</span>
+      <div class="transcript-box" id="transcriptBox">
+        <span class="hint-text">Say a move like &ldquo;e2 to e4&rdquo; or &ldquo;knight to f3&rdquo;</span>
+      </div>
+    </div>
+
+    <!-- Info strip -->
+    <div class="info-strip">
+      <div class="turn-badge">
+        <div class="turn-swatch" id="turnSwatch"></div>
+        <span id="turnLabel">White to move</span>
+      </div>
+      <span id="moveCount">Move 1</span>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <button class="std-btn btn-secondary" id="btnFlip">Flip Board</button>
+      <button class="std-btn btn-primary"   id="btnReset">New Game</button>
+    </div>
+  </div>
+
+  <!-- Move log -->
+  <div class="move-log-section">
+    <h2>Move Log</h2>
+    <div id="moveLog"></div>
+  </div>
+
+</div><!-- /.page-wrapper -->
+
+
+<!-- Dependencies -->
+<script src="https://code.jquery.com/jquery-3.7.1.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"
+        crossorigin="anonymous"></script>
+
+<script>
+(function () {
+  'use strict';
+
+  // =========================================================================
+  // WebSocket
+  // =========================================================================
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  const WS_URL   = `${protocol}://${location.host}/ws`;
+  let socket      = null;
+  let reconnectMs = 2000;
+
+  function setStatus(state, text) {
+    $('#statusDot').removeClass('connected disconnected pending').addClass(state);
+    $('#statusText').text(text);
+  }
+
+  function connect() {
+    setStatus('pending', 'Connecting…');
+    socket = new WebSocket(WS_URL);
+
+    socket.addEventListener('open', () => {
+      setStatus('connected', 'Connected');
+      reconnectMs = 2000;
+      logEvent('Connected to server.');
+    });
+
+    socket.addEventListener('close', () => {
+      setStatus('disconnected', `Reconnecting in ${reconnectMs / 1000}s…`);
+      logEvent('Connection lost — reconnecting…');
+      setTimeout(connect, reconnectMs);
+      reconnectMs = Math.min(reconnectMs * 2, 30000);
+    });
+
+    socket.addEventListener('error', () => setStatus('disconnected', 'Connection error'));
+
+    socket.addEventListener('message', (evt) => {
+      let msg;
+      try { msg = JSON.parse(evt.data); } catch { return; }
+
+      if (msg.fen) {
+        board.position(msg.fen, true);
+        chess.load(msg.fen);   // keep local chess.js in sync for move highlighting
+        updateTurnDisplay(msg.fen);
+      }
+
+      if (msg.event === 'invalid') {
+        clearSelection();
+        setVoiceResult(`Could not play "${msg.uci}". Try again.`, 'error');
+      } else if (msg.event === 'move' && msg.uci) {
+        logMove(msg.uci);
+        clearSelection();
+      } else if (msg.event === 'reset') {
+        $('#moveLog').empty();
+        moveNumber = 1;
+        clearSelection();
+        logEvent('Game reset.');
+      } else if (msg.event === 'sync') {
+        logEvent('Board synchronised.');
+      }
+    });
+  }
+
+  function sendMove(from, to) {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ from, to }));
+    }
+  }
+
+  // =========================================================================
+  // Board setup
+  // =========================================================================
+  let moveNumber = 1;
+
+  const config = {
+    draggable : false,          // disabled by default; enabled in select mode below
+    position  : 'start',
+    pieceTheme: 'https://lichess1.org/assets/piece/cburnett/{piece}.svg',
+
+    onDrop: function (source, target) {
+      sendMove(source, target);
+      return 'snapback';
+    },
+
+    onDragStart: function () {
+      return currentMode === 'select' && socket && socket.readyState === WebSocket.OPEN;
+    },
+  };
+
+  const board = Chessboard('board', config);
+  $(window).resize(() => board.resize());
+
+  // chess.js instance — kept in sync with server FEN for legal-move calculation.
+  // It is never used to validate moves; the server remains the source of truth.
+  const chess = new Chess();
+
+  // =========================================================================
+  // Mode state
+  // =========================================================================
+  let currentMode = 'select'; // 'select' | 'voice'
+
+  const SUBTITLES = {
+    select: 'Tap a piece, then tap its destination.',
+    voice:  'Use voice commands to make your move.',
+  };
+
+  function switchMode(mode) {
+    currentMode = mode;
+
+    // Toggle button active states.
+    $('.mode-btn').removeClass('active');
+    $(`.mode-btn[data-mode="${mode}"]`).addClass('active');
+
+    // Show/hide panels (using jQuery show/hide so CSS display rules can't override).
+    if (mode === 'voice') {
+      $('#voicePanel').show();
+      $('#selectHint').hide();
+    } else {
+      $('#voicePanel').hide();
+      $('#selectHint').show();
+    }
+
+    // Update subtitle.
+    $('#modeSubtitle').text(SUBTITLES[mode]);
+
+    // Reset interaction state.
+    clearSelection();
+    stopListening();
+  }
+
+  $('.mode-btn').on('click', function () {
+    switchMode($(this).data('mode'));
+  });
+
+  // =========================================================================
+  // SELECT PIECE MODE
+  // =========================================================================
+  let selectedSquare = null;
+
+  // Intercept clicks on chessboard squares (chessboard.js renders [data-square]).
+  // Using event delegation on the board wrapper.
+  $('#board').on('click', '[data-square]', function () {
+    if (currentMode !== 'select') return;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+
+    const square = $(this).data('square');
+    handleSquareClick(square);
+  });
+
+  function handleSquareClick(square) {
+    if (selectedSquare === null) {
+      // First tap — only select a piece that belongs to the player whose turn it is.
+      const pos = board.position();
+      if (!pos[square]) return;                       // empty square
+      if (pos[square][0] !== chess.turn()) return;    // opponent's piece — ignore silently
+
+      selectedSquare = square;
+      highlightSquare(square, 'selected');
+
+      // Highlight all legal destination squares using chess.js move generation.
+      const legalMoves = chess.moves({ square, verbose: true });
+      legalMoves.forEach(m => highlightSquare(m.to, 'valid'));
+
+      const count = legalMoves.length;
+      $('#selectHint').addClass('active')
+        .text(`${square.toUpperCase()} selected — ${count} move${count !== 1 ? 's' : ''} available. Tap destination.`);
+    } else {
+      if (square === selectedSquare) {
+        // Tapped same square again: deselect.
+        clearSelection();
+        return;
+      }
+      // Second tap — send the move; server validates.
+      sendMove(selectedSquare, square);
+      clearSelection();
+    }
+  }
+
+  function highlightSquare(square, type) {
+    $(`[data-square="${square}"]`).addClass(`sq-${type}`);
+  }
+
+  function clearSelection() {
+    selectedSquare = null;
+    $('[data-square]').removeClass('sq-selected sq-valid');
+    $('#selectHint').removeClass('active').text('Tap a piece to select it.');
+  }
+
+  // =========================================================================
+  // VOICE COMMAND MODE
+  // =========================================================================
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognizer  = null;
+  let listening   = false;
+
+  if (SpeechRecognition) {
+    recognizer = new SpeechRecognition();
+    recognizer.lang        = 'en-US';
+    recognizer.interimResults = true;
+    recognizer.continuous  = false;
+    recognizer.maxAlternatives = 3;
+
+    recognizer.addEventListener('result', (evt) => {
+      const results = evt.results[evt.results.length - 1];
+      const interim = results[0].transcript;
+
+      // Show interim transcript while speaking.
+      if (!results.isFinal) {
+        setVoiceResult(`"${interim}"`, 'heard');
+        return;
+      }
+
+      // Try each alternative until one parses.
+      let parsed = null;
+      for (let i = 0; i < results.length; i++) {
+        parsed = parseVoiceMove(results[i].transcript);
+        if (parsed) break;
+      }
+
+      if (parsed) {
+        setVoiceResult(`Heard: "${interim}" → ${parsed.from.toUpperCase()}${parsed.to.toUpperCase()}`, 'parsed');
+        sendMove(parsed.from, parsed.to);
+      } else {
+        setVoiceResult(`Couldn't parse "${interim}". Try "e2 to e4".`, 'error');
+      }
+    });
+
+    recognizer.addEventListener('end', () => {
+      listening = false;
+      updateMicUI();
+    });
+
+    recognizer.addEventListener('error', (evt) => {
+      listening = false;
+      updateMicUI();
+      const msg = evt.error === 'not-allowed'
+        ? 'Microphone access denied. Check browser permissions.'
+        : `Speech error: ${evt.error}`;
+      setVoiceResult(msg, 'error');
+    });
+  }
+
+  $('#micBtn').on('click', () => {
+    if (!SpeechRecognition) {
+      setVoiceResult('Speech recognition is not supported in this browser.', 'error');
+      return;
+    }
+    if (listening) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  });
+
+  function startListening() {
+    if (!recognizer || listening) return;
+    try {
+      recognizer.start();
+      listening = true;
+      updateMicUI();
+      setVoiceResult('<span class="hint-text">Listening…</span>');
+    } catch (e) {
+      setVoiceResult('Could not start microphone.', 'error');
+    }
+  }
+
+  function stopListening() {
+    if (recognizer && listening) {
+      recognizer.stop();
+    }
+    listening = false;
+    updateMicUI();
+  }
+
+  function updateMicUI() {
+    const $btn = $('#micBtn');
+    const $lbl = $('#micLabel');
+    $btn.removeClass('listening processing');
+    if (listening) {
+      $btn.addClass('listening');
+      $lbl.text('TAP TO STOP');
+    } else {
+      $lbl.text('TAP TO SPEAK');
+    }
+  }
+
+  // Display a result line in the transcript box.
+  // type: 'heard' | 'parsed' | 'error' | 'hint' | null (raw HTML)
+  function setVoiceResult(text, type) {
+    if (currentMode !== 'voice') return;
+    let html;
+    if (type === 'heard')  html = `<span class="heard-text">${escHtml(text)}</span>`;
+    else if (type === 'parsed') html = `<span class="parsed-move">${escHtml(text)}</span>`;
+    else if (type === 'error')  html = `<span class="error-text">${escHtml(text)}</span>`;
+    else                        html = text; // raw / hint
+    $('#transcriptBox').html(html);
+  }
+
+  /**
+   * Parse a natural-language move utterance into {from, to} UCI squares.
+   * Handles formats like:
+   *   "e2 to e4"  |  "e2e4"  |  "move e2 to e4"  |  "a1 b3"
+   */
+  function parseVoiceMove(text) {
+    text = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+    const squares = text.match(/\b[a-h][1-8]\b/g);
+    if (squares && squares.length >= 2) {
+      return { from: squares[0], to: squares[1] };
+    }
+    return null;
+  }
+
+  // =========================================================================
+  // Shared UI helpers
+  // =========================================================================
+  function updateTurnDisplay(fen) {
+    const parts = fen.split(' ');
+    const isWhite = parts[1] === 'w';
+    const fullMove = parseInt(parts[5] || '1', 10);
+    $('#turnSwatch').toggleClass('black', !isWhite);
+    $('#turnLabel').text(isWhite ? 'White to move' : 'Black to move');
+    $('#moveCount').text(`Move ${fullMove}`);
+  }
+
+  function logMove(uci) {
+    appendLog($('<div class="move-entry"></div>').text(`${moveNumber++}. ${uci}`));
+  }
+
+  function logEvent(text) {
+    appendLog($('<div class="move-entry event"></div>').text(text));
+  }
+
+  function appendLog($el) {
+    const $log = $('#moveLog');
+    $log.append($el);
+    $log.scrollTop($log[0].scrollHeight);
+  }
+
+  function escHtml(str) {
+    return $('<span>').text(str).html();
+  }
+
+  // =========================================================================
+  // Button handlers
+  // =========================================================================
+  $('#btnFlip').on('click', () => board.flip());
+
+  $('#btnReset').on('click', () => {
+    if (!confirm('Start a new game? The current game will be lost.')) return;
+    fetch('/reset', { method: 'POST' })
+      .then(r => r.json())
+      .then(data => {
+        if (data.fen) { board.position(data.fen, true); updateTurnDisplay(data.fen); }
+      })
+      .catch(() => logEvent('Reset request failed.'));
+  });
+
+  // =========================================================================
+  // Boot
+  // =========================================================================
+  connect();
+  switchMode('select'); // start in select-piece mode
+
+})();
+</script>
+</body>
+</html>
