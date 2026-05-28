@@ -2,15 +2,15 @@ import rclpy
 from std_srvs.srv import Trigger
 import hello_helpers.hello_misc as hm
 
-class ArucoBaseAlignNode(hm.HelloNode):
+class AutoChess(hm.HelloNode):
     
     def __init__(self):
         hm.HelloNode.__init__(self)
         
         # --- CONFIGURATION ---
-        self.aruco_frame = 'aruco_marker_0' 
-        self.robot_frame = 'base_link'      
-        self.desired_distance_offset = 0.50 
+        self.aruco_frame = 'Rank8'
+        self.robot_frame = 'base_link'
+        self.desired_distance_offset = 0.50
 
     def main(self):
         # 1. Initialize HelloNode (This automatically sets up TF listeners and joint state subscribers!)
@@ -24,11 +24,11 @@ class ArucoBaseAlignNode(hm.HelloNode):
         # 2. Setup Custom Trigger Service
         self.trigger_service = self.create_service(
             Trigger,
-            'align_to_aruco',
+            'move_rank_8',
             self.align_base_callback
         )
 
-        self.get_logger().info('Ready! Call /align_to_aruco to align to the marker.')
+        self.get_logger().info('Ready! Call /move_rank_8 to align to the marker.')
 
         # 3. Spin the node
         try:
@@ -45,7 +45,13 @@ class ArucoBaseAlignNode(hm.HelloNode):
 
     def align_base_callback(self, request, response):
         """Triggered via service call. Looks up TF and moves the base."""
-        self.get_logger().info('Trigger received: Looking for ArUco marker...')
+        self.get_logger().info('Trigger received: Retracting arm before alignment...')
+
+        # 1. Retract the arm (Blocking call)
+        # This will pause the service callback until the arm has reached the goal
+        self.get_logger().info('Moving arm to 0.0 (fully inward)...')
+        self.move_to_pose({'wrist_extension': 0.0}, blocking=True)
+        self.get_logger().info('Arm retracted. Proceeding to base alignment.')
 
         # Failsafe 1: Check Joint States (Populated automatically by HelloNode)
         if self.joint_state is None:
@@ -94,5 +100,5 @@ class ArucoBaseAlignNode(hm.HelloNode):
         return response
 
 if __name__ == '__main__':
-    node = ArucoBaseAlignNode()
+    node = AutoChess()
     node.main()
