@@ -1,0 +1,42 @@
+[1.126s] Invoking command in '/home/capstone/aaso_ws/src/CSE481C_Final_Project': PYTHONPATH=/home/capstone/aaso_ws/src/build/aaso_final_project/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/capstone/aaso_ws/src/install/aaso_final_project/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../build/aaso_final_project build --build-base /home/capstone/aaso_ws/src/build/aaso_final_project/build install --record /home/capstone/aaso_ws/src/build/aaso_final_project/install.log --single-version-externally-managed install_data
+[1.547s] running egg_info
+[1.547s] creating ../build/aaso_final_project/aaso_final_project.egg-info
+[1.548s] writing ../build/aaso_final_project/aaso_final_project.egg-info/PKG-INFO
+[1.548s] writing dependency_links to ../build/aaso_final_project/aaso_final_project.egg-info/dependency_links.txt
+[1.548s] writing entry points to ../build/aaso_final_project/aaso_final_project.egg-info/entry_points.txt
+[1.548s] writing requirements to ../build/aaso_final_project/aaso_final_project.egg-info/requires.txt
+[1.548s] writing top-level names to ../build/aaso_final_project/aaso_final_project.egg-info/top_level.txt
+[1.549s] writing manifest file '../build/aaso_final_project/aaso_final_project.egg-info/SOURCES.txt'
+[1.551s] reading manifest file '../build/aaso_final_project/aaso_final_project.egg-info/SOURCES.txt'
+[1.551s] writing manifest file '../build/aaso_final_project/aaso_final_project.egg-info/SOURCES.txt'
+[1.551s] running build
+[1.552s] running build_py
+[1.552s] creating /home/capstone/aaso_ws/src/build/aaso_final_project/build
+[1.552s] creating /home/capstone/aaso_ws/src/build/aaso_final_project/build/lib
+[1.552s] creating /home/capstone/aaso_ws/src/build/aaso_final_project/build/lib/aaso_final_project
+[1.552s] copying aaso_final_project/hello.py -> /home/capstone/aaso_ws/src/build/aaso_final_project/build/lib/aaso_final_project
+[1.552s] copying aaso_final_project/__init__.py -> /home/capstone/aaso_ws/src/build/aaso_final_project/build/lib/aaso_final_project
+[1.552s] copying aaso_final_project/aruco_node.py -> /home/capstone/aaso_ws/src/build/aaso_final_project/build/lib/aaso_final_project
+[1.553s] running install
+[1.553s] running install_lib
+[1.554s] creating /home/capstone/aaso_ws/src/install/aaso_final_project/lib/python3.10/site-packages/aaso_final_project
+[1.554s] copying /home/capstone/aaso_ws/src/build/aaso_final_project/build/lib/aaso_final_project/hello.py -> /home/capstone/aaso_ws/src/install/aaso_final_project/lib/python3.10/site-packages/aaso_final_project
+[1.554s] copying /home/capstone/aaso_ws/src/build/aaso_final_project/build/lib/aaso_final_project/__init__.py -> /home/capstone/aaso_ws/src/install/aaso_final_project/lib/python3.10/site-packages/aaso_final_project
+[1.554s] copying /home/capstone/aaso_ws/src/build/aaso_final_project/build/lib/aaso_final_project/aruco_node.py -> /home/capstone/aaso_ws/src/install/aaso_final_project/lib/python3.10/site-packages/aaso_final_project
+[1.555s] byte-compiling /home/capstone/aaso_ws/src/install/aaso_final_project/lib/python3.10/site-packages/aaso_final_project/hello.py to hello.cpython-310.pyc
+[1.555s] byte-compiling /home/capstone/aaso_ws/src/install/aaso_final_project/lib/python3.10/site-packages/aaso_final_project/__init__.py to __init__.cpython-310.pyc
+[1.556s] byte-compiling /home/capstone/aaso_ws/src/install/aaso_final_project/lib/python3.10/site-packages/aaso_final_project/aruco_node.py to aruco_node.cpython-310.pyc
+[1.556s] running install_data
+[1.556s] creating /home/capstone/aaso_ws/src/install/aaso_final_project/share/ament_index
+[1.556s] creating /home/capstone/aaso_ws/src/install/aaso_final_project/share/ament_index/resource_index
+[1.556s] creating /home/capstone/aaso_ws/src/install/aaso_final_project/share/ament_index/resource_index/packages
+[1.556s] copying resource/aaso_final_project -> /home/capstone/aaso_ws/src/install/aaso_final_project/share/ament_index/resource_index/packages
+[1.557s] copying package.xml -> /home/capstone/aaso_ws/src/install/aaso_final_project/share/aaso_final_project
+[1.557s] creating /home/capstone/aaso_ws/src/install/aaso_final_project/share/aaso_final_project/config
+[1.557s] copying config/aruco_markers.yaml -> /home/capstone/aaso_ws/src/install/aaso_final_project/share/aaso_final_project/config
+[1.557s] running install_egg_info
+[1.559s] Copying ../build/aaso_final_project/aaso_final_project.egg-info to /home/capstone/aaso_ws/src/install/aaso_final_project/lib/python3.10/site-packages/aaso_final_project-0.0.0-py3.10.egg-info
+[1.560s] running install_scripts
+[1.584s] Installing aruco_node script to /home/capstone/aaso_ws/src/install/aaso_final_project/lib/aaso_final_project
+[1.584s] writing list of installed files to '/home/capstone/aaso_ws/src/build/aaso_final_project/install.log'
+[1.610s] Invoked command in '/home/capstone/aaso_ws/src/CSE481C_Final_Project' returned '0': PYTHONPATH=/home/capstone/aaso_ws/src/build/aaso_final_project/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/capstone/aaso_ws/src/install/aaso_final_project/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../build/aaso_final_project build --build-base /home/capstone/aaso_ws/src/build/aaso_final_project/build install --record /home/capstone/aaso_ws/src/build/aaso_final_project/install.log --single-version-externally-managed install_data
