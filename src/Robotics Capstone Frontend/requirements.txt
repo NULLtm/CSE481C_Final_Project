@@ -1,0 +1,5 @@
+chess==1.11.2
+fastapi==0.136.3
+numpy==1.24.3
+opencv_python==4.8.0.74
+uvicorn==0.48.0

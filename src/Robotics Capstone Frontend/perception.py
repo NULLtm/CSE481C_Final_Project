@@ -1,7 +1,26 @@
 """
 Accessible Robotic Chess Player — Vision & Perception Module
-OpenCV ArUco pipeline: detects board corners (IDs 33-36), applies perspective
-warp to produce a top-down view, then maps piece markers (IDs 1-32) to squares.
+OpenCV ArUco pipeline that mirrors the marker assignments in
+``CSE481C_Final_Project/config/aruco_markers.yaml``:
+
+- IDs 1-32  : piece markers placed on top of each chess piece.
+- IDs 33-40 : file fiducials FileA..FileH. Each ID is printed TWICE — once
+              on the top edge and once on the bottom edge of the board —
+              so the board can be flipped without changing anything.
+- IDs 41-48 : rank fiducials Rank1..Rank8. Same dual-edge scheme: each ID
+              appears on both the left and right edges.
+- IDs 49-50 : WhitePromo / BlackPromo. Each ID is printed TWICE — once in
+              each corner on that player's side of the board — giving 4
+              promotion holding squares total (2 per player).
+
+Because each file/rank ID appears twice in a top-down view, _extract_fiducials
+generates TWO candidate warped-pixel correspondences per detection (one per
+possible edge). cv2.findHomography with RANSAC selects the geometrically
+consistent set (~50 % inlier ratio), reliably recovering the correct transform
+regardless of which physical edges happen to be visible.
+
+Promo markers are reported with their raw image-pixel position; they live
+off the board and are not mapped to chess squares.
 """
 
 import sys
@@ -20,22 +39,48 @@ log = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-# ArUco marker IDs assigned to board corners (order matters for warp).
-CORNER_IDS = {
-    33: "top-left",
-    34: "top-right",
-    35: "bottom-right",
-    36: "bottom-left",
-}
-CORNER_ORDER = [33, 34, 35, 36]  # must match src pts order for getPerspectiveTransform
-
-PIECE_ID_RANGE = range(1, 33)    # IDs 1–32 represent chess pieces
-
 # Output dimensions of the warped top-down board image.
-WARP_SIZE = 800   # pixels (square image); each chess square = WARP_SIZE / 8 = 100 px
+WARP_SIZE = 800           # pixels (square image); 100 px per chess square
+CELL_PX = WARP_SIZE // 8  # 100 px
 
 FILES = list("abcdefgh")
-RANKS = list("87654321")  # rank 8 = top row in image, rank 1 = bottom row
+RANKS = list("87654321")  # rank 8 = top row of warped image, rank 1 = bottom row
+
+# Piece-marker IDs to their human-readable names, mirroring aruco_markers.yaml.
+PIECE_NAMES: dict[int, str] = {
+    1:  "WhitePawn1",   2:  "WhiteBishop1", 3:  "BlackPawn1",   4:  "BlackPawn2",
+    5:  "BlackPawn3",   6:  "BlackPawn4",   7:  "WhiteRook1",   8:  "BlackBishop1",
+    9:  "BlackPawn5",  10:  "WhitePawn2",  11:  "WhiteQueen1", 12:  "BlackRook1",
+    13: "BlackPawn6",  14:  "BlackBishop2", 15: "BlackQueen1", 16:  "BlackKing1",
+    17: "WhitePawn3",  18:  "WhitePawn4",  19:  "WhiteKnight1", 20: "WhiteKing1",
+    21: "WhiteBishop2", 22: "WhiteRook2",  23:  "BlackKnight1", 24: "BlackKnight2",
+    25: "WhitePawn5",  26:  "BlackPawn7",  27:  "WhitePawn6",  28:  "BlackPawn8",
+    29: "BlackRook2",  30:  "WhitePawn7",  31:  "WhitePawn8",  32:  "WhiteKnight2",
+}
+PIECE_IDS = set(PIECE_NAMES)
+
+# Edge fiducials: 33-40 are file markers (one per file letter), 41-48 are rank
+# markers (one per rank number). Each maps to its 0-indexed file/rank position.
+FILE_MARKER_IDS: dict[int, int] = {33 + i: i for i in range(8)}  # 33->a ... 40->h
+RANK_MARKER_IDS: dict[int, int] = {41 + i: i for i in range(8)}  # 41->rank1 ... 48->rank8
+
+# Promotion holding markers (off-board); only their image position is reported.
+PROMO_NAMES: dict[int, str] = {49: "WhitePromo", 50: "BlackPromo"}
+
+
+def _file_warp_pts(col: int) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Both candidate warped-pixel positions for a file marker at column `col` (0=a..7=h).
+    Returns (top-edge position, bottom-edge position); RANSAC picks the correct one."""
+    x = (col + 0.5) * CELL_PX
+    return ((x, -0.5 * CELL_PX), (x, WARP_SIZE + 0.5 * CELL_PX))
+
+
+def _rank_warp_pts(rank_idx: int) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Both candidate warped-pixel positions for a rank marker at rank_idx (0=rank1..7=rank8).
+    Returns (left-edge position, right-edge position); RANSAC picks the correct one."""
+    # rank index 0 (rank 1) -> bottom row of board image; rank index 7 (rank 8) -> top.
+    y = (7 - rank_idx + 0.5) * CELL_PX
+    return ((-0.5 * CELL_PX, y), (WARP_SIZE + 0.5 * CELL_PX, y))
 
 
 # ---------------------------------------------------------------------------
@@ -61,45 +106,61 @@ def _marker_center(corners: np.ndarray) -> tuple[float, float]:
     return cx, cy
 
 
-def _extract_board_corners(
+def _extract_fiducials(
     ids: np.ndarray,
     corners: list,
-) -> np.ndarray | None:
+) -> tuple[np.ndarray, np.ndarray] | None:
     """
-    Locate the four board-boundary markers in the detection results and
-    return their centres as a (4, 2) float32 array ordered [TL, TR, BR, BL].
-    Returns None if any corner marker is missing.
-    """
-    id_to_centre: dict[int, tuple[float, float]] = {}
-    for marker_corners, marker_id in zip(corners, ids.flatten()):
-        if marker_id in CORNER_IDS:
-            id_to_centre[int(marker_id)] = _marker_center(marker_corners)
+    Build (image_pts, warp_pts) correspondences for cv2.findHomography.
 
-    if len(id_to_centre) < 4:
-        missing = [mid for mid in CORNER_ORDER if mid not in id_to_centre]
-        log.warning("Missing corner marker IDs: %s", missing)
+    Each detected file/rank marker yields TWO candidate correspondences —
+    one per possible physical edge (top/bottom for files, left/right for ranks).
+    RANSAC inside _build_homography selects the geometrically consistent half
+    and discards the contradictory candidates as outliers.
+
+    Requires at least 2 unique file IDs and 2 unique rank IDs detected.
+    """
+    img_pts: list[tuple[float, float]] = []
+    warp_pts: list[tuple[float, float]] = []
+    n_file = n_rank = 0
+
+    for marker_corners, marker_id in zip(corners, ids.flatten()):
+        mid = int(marker_id)
+        cx, cy = _marker_center(marker_corners)
+        if mid in FILE_MARKER_IDS:
+            for wp in _file_warp_pts(FILE_MARKER_IDS[mid]):
+                img_pts.append((cx, cy))
+                warp_pts.append(wp)
+            n_file += 1
+        elif mid in RANK_MARKER_IDS:
+            for wp in _rank_warp_pts(RANK_MARKER_IDS[mid]):
+                img_pts.append((cx, cy))
+                warp_pts.append(wp)
+            n_rank += 1
+
+    if n_file < 2 or n_rank < 2:
+        log.warning(
+            "Insufficient board fiducials (file=%d, rank=%d). "
+            "Need at least 2 of each to compute a homography.",
+            n_file, n_rank,
+        )
         return None
 
-    src_pts = np.array(
-        [id_to_centre[mid] for mid in CORNER_ORDER],
-        dtype=np.float32,
+    return (
+        np.asarray(img_pts, dtype=np.float32),
+        np.asarray(warp_pts, dtype=np.float32),
     )
-    return src_pts
 
 
-def _build_warp_transform(src_pts: np.ndarray) -> np.ndarray:
-    """Compute the perspective transform matrix from board corners to a square canvas."""
-    dst_pts = np.array(
-        [
-            [0,         0        ],
-            [WARP_SIZE, 0        ],
-            [WARP_SIZE, WARP_SIZE],
-            [0,         WARP_SIZE],
-        ],
-        dtype=np.float32,
-    )
-    M = cv2.getPerspectiveTransform(src_pts, dst_pts)
-    return M
+def _build_homography(
+    img_pts: np.ndarray, warp_pts: np.ndarray
+) -> np.ndarray | None:
+    """Solve the image -> warped-board homography. Returns None on failure."""
+    H, _ = cv2.findHomography(img_pts, warp_pts, method=cv2.RANSAC,
+                              ransacReprojThreshold=5.0)
+    if H is None:
+        log.error("findHomography failed — fiducial geometry may be degenerate.")
+    return H
 
 
 def _pixel_to_square(px: float, py: float) -> str | None:
@@ -127,12 +188,16 @@ def _pixel_to_square(px: float, py: float) -> str | None:
 def detect_board_state(
     frame: np.ndarray,
     detector: cv2.aruco.ArucoDetector,
-) -> dict[int, str] | None:
+) -> tuple[dict[int, str], dict[int, tuple[float, float]], np.ndarray] | None:
     """
     Run the full perception pipeline on a single camera frame.
 
-    Returns a mapping of {piece_id: square_label} for all detected piece markers,
-    or None if the board perspective transform could not be established.
+    Returns:
+        (piece_positions, promo_positions, warped) where
+          - piece_positions maps piece marker ID -> square label (e.g. 17 -> "e2"),
+          - promo_positions maps promo marker ID -> (image x, image y) of its centre,
+          - warped is the 800x800 top-down board image.
+        Returns None if the homography could not be established.
     """
     corners, ids, _ = detector.detectMarkers(frame)
 
@@ -140,38 +205,41 @@ def detect_board_state(
         log.warning("No ArUco markers detected in frame.")
         return None
 
-    # --- Establish board perspective warp ---
-    src_pts = _extract_board_corners(ids, corners)
-    if src_pts is None:
+    fid = _extract_fiducials(ids, corners)
+    if fid is None:
+        return None
+    img_pts, warp_pts = fid
+
+    H = _build_homography(img_pts, warp_pts)
+    if H is None:
         return None
 
-    M = _build_warp_transform(src_pts)
+    warped = cv2.warpPerspective(frame, H, (WARP_SIZE, WARP_SIZE))
 
-    # --- Warp the frame to top-down view (useful for visualisation / debugging) ---
-    warped = cv2.warpPerspective(frame, M, (WARP_SIZE, WARP_SIZE))
-
-    # --- Map each piece marker to a square ---
     piece_positions: dict[int, str] = {}
+    promo_positions: dict[int, tuple[float, float]] = {}
+
     for marker_corners, marker_id in zip(corners, ids.flatten()):
-        pid = int(marker_id)
-        if pid not in PIECE_ID_RANGE:
-            continue  # skip corner markers
+        mid = int(marker_id)
+        cx, cy = _marker_center(marker_corners)
 
-        cx_orig, cy_orig = _marker_center(marker_corners)
+        if mid in PIECE_IDS:
+            pt = np.array([[[cx, cy]]], dtype=np.float32)
+            wx, wy = cv2.perspectiveTransform(pt, H)[0][0]
+            square = _pixel_to_square(wx, wy)
+            if square:
+                piece_positions[mid] = square
+                log.debug("%s (ID %d) -> %s  (warped px: %.1f, %.1f)",
+                          PIECE_NAMES[mid], mid, square, wx, wy)
+            else:
+                log.warning("%s (ID %d) centre (%.1f, %.1f) is outside the warped board.",
+                            PIECE_NAMES[mid], mid, wx, wy)
+        elif mid in PROMO_NAMES:
+            promo_positions[mid] = (cx, cy)
+            log.debug("%s (ID %d) detected at image px (%.1f, %.1f)",
+                      PROMO_NAMES[mid], mid, cx, cy)
 
-        # Transform the marker centre point through the same perspective matrix.
-        pt = np.array([[[cx_orig, cy_orig]]], dtype=np.float32)
-        warped_pt = cv2.perspectiveTransform(pt, M)
-        wx, wy = warped_pt[0][0]
-
-        square = _pixel_to_square(wx, wy)
-        if square:
-            piece_positions[pid] = square
-            log.debug("Piece ID %2d → square %s  (warped px: %.1f, %.1f)", pid, square, wx, wy)
-        else:
-            log.warning("Piece ID %d centre (%.1f, %.1f) is outside the warped board.", pid, wx, wy)
-
-    return piece_positions, warped  # type: ignore[return-value]
+    return piece_positions, promo_positions, warped
 
 
 # ---------------------------------------------------------------------------
@@ -180,46 +248,72 @@ def detect_board_state(
 
 def _create_mock_frame(width: int = 1280, height: int = 720) -> np.ndarray:
     """
-    Generate a synthetic camera frame with printed ArUco markers at known positions.
-    Used for unit testing / simulation when no real camera is attached.
+    Generate a synthetic camera frame that matches the physical board layout:
+    - File markers (33-40) on BOTH top and bottom edges.
+    - Rank markers (41-48) on BOTH left and right edges.
+    - Promo markers (49, 50) in all 4 corners — each ID appears twice,
+      once per corner on that player's side (symmetric for board-flip).
+    - A few piece markers on starting squares.
     """
-    frame = np.full((height, width, 3), fill_value=200, dtype=np.uint8)  # grey background
+    frame = np.full((height, width, 3), fill_value=200, dtype=np.uint8)
     dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
 
-    marker_size = 60  # pixels
+    marker_size = 40
 
-    # Corner marker positions: [TL, TR, BR, BL] matching CORNER_ORDER [33, 34, 35, 36]
-    corner_positions = {
-        33: (80,  80 ),   # top-left
-        34: (1140, 80 ),  # top-right
-        35: (1140, 580),  # bottom-right
-        36: (80,  580),   # bottom-left
-    }
+    # Virtual board region (the 8×8 playing area only).
+    board_left, board_top = 200, 100
+    board_size = 480
+    cell = board_size / 8
+    board_right = board_left + board_size
+    board_bottom = board_top + board_size
 
-    for mid, (ox, oy) in corner_positions.items():
+    def stamp(mid: int, cx: int, cy: int) -> None:
         img = cv2.aruco.generateImageMarker(dictionary, mid, marker_size)
         img_bgr = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-        frame[oy:oy + marker_size, ox:ox + marker_size] = img_bgr
+        x0 = max(cx - marker_size // 2, 0)
+        y0 = max(cy - marker_size // 2, 0)
+        x1 = min(x0 + marker_size, width)
+        y1 = min(y0 + marker_size, height)
+        frame[y0:y1, x0:x1] = img_bgr[: y1 - y0, : x1 - x0]
 
-    # Place a few piece markers (IDs 1, 2, 3) at approximate square positions.
-    board_left, board_top = 80, 80
-    board_right, board_bottom = 1200, 640
-    sq_w = (board_right - board_left) / 8
-    sq_h = (board_bottom - board_top) / 8
+    # File markers on the TOP and BOTTOM edges (same ID on both sides).
+    for mid, col in FILE_MARKER_IDS.items():
+        fx = int(board_left + (col + 0.5) * cell)
+        stamp(mid, fx, int(board_top - cell * 0.5))    # top edge
+        stamp(mid, fx, int(board_bottom + cell * 0.5)) # bottom edge
 
-    piece_squares = {
-        1: (0, 6),  # a2 — file 0, rank index 6 from top
-        2: (4, 6),  # e2
-        3: (3, 0),  # d8
+    # Rank markers on the LEFT and RIGHT edges (same ID on both sides).
+    for mid, rank_idx in RANK_MARKER_IDS.items():
+        row_from_top = 7 - rank_idx
+        ry = int(board_top + (row_from_top + 0.5) * cell)
+        stamp(mid, int(board_left - cell * 0.5), ry)   # left edge
+        stamp(mid, int(board_right + cell * 0.5), ry)  # right edge
+
+    # Promo squares in all 4 corners. WhitePromo (49) is on black's back-rank
+    # side (top of image = rank 8); BlackPromo (50) is on white's side (bottom).
+    # Each ID appears twice — once per corner on that player's side — maintaining
+    # flip symmetry.
+    promo_off = int(cell * 0.6)
+    stamp(49, board_left  - promo_off, board_top    - promo_off)  # top-left
+    stamp(49, board_right + promo_off, board_top    - promo_off)  # top-right
+    stamp(50, board_left  - promo_off, board_bottom + promo_off)  # bottom-left
+    stamp(50, board_right + promo_off, board_bottom + promo_off)  # bottom-right
+
+    # A handful of pieces on their starting squares.
+    starting_squares: dict[int, tuple[str, int]] = {
+        20: ("e", 1),  # WhiteKing1
+        16: ("e", 8),  # BlackKing1
+        11: ("d", 1),  # WhiteQueen1
+        15: ("d", 8),  # BlackQueen1
+        1:  ("a", 2),  # WhitePawn1
+        3:  ("a", 7),  # BlackPawn1
     }
-
-    for pid, (fc, rc) in piece_squares.items():
-        ox = int(board_left + fc * sq_w + sq_w / 2 - marker_size / 2)
-        oy = int(board_top  + rc * sq_h + sq_h / 2 - marker_size / 2)
-        img = cv2.aruco.generateImageMarker(dictionary, pid, marker_size)
-        img_bgr = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-        oy2, ox2 = min(oy + marker_size, height), min(ox + marker_size, width)
-        frame[oy:oy2, ox:ox2] = img_bgr[: oy2 - oy, : ox2 - ox]
+    for mid, (file_letter, rank_n) in starting_squares.items():
+        col = FILES.index(file_letter)
+        row_from_top = 8 - rank_n
+        px = int(board_left + (col + 0.5) * cell)
+        py = int(board_top + (row_from_top + 0.5) * cell)
+        stamp(mid, px, py)
 
     return frame
 
@@ -261,8 +355,13 @@ def run_perception_loop(use_camera: bool = False, camera_index: int = 0) -> None
             result = detect_board_state(frame, detector)
 
             if result is not None:
-                piece_positions, warped = result
-                log.info("Detected %d piece marker(s): %s", len(piece_positions), piece_positions)
+                piece_positions, promo_positions, warped = result
+                log.info("Detected %d piece marker(s): %s",
+                         len(piece_positions), piece_positions)
+                if promo_positions:
+                    log.info("Promo marker(s): %s",
+                             {PROMO_NAMES[mid]: pos
+                              for mid, pos in promo_positions.items()})
 
                 # Draw grid overlay on the warped image for debugging.
                 _draw_grid(warped)

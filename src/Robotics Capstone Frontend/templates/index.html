@@ -391,6 +391,143 @@
       button.std-btn { padding: 10px 18px; font-size: 0.82rem; }
       .mode-btn { font-size: 0.82rem; padding: 10px 14px; }
     }
+
+    /* ------------------------------------------------------------------ */
+    /* Promotion Dialog                                                    */
+    /* ------------------------------------------------------------------ */
+    #promoModal {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #promoBackdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.65);
+    }
+
+    #promoDialog {
+      position: relative;
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 24px 28px 28px;
+      text-align: center;
+      z-index: 1;
+      min-width: 280px;
+    }
+
+    #promoDialog p {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 18px;
+      color: var(--text-primary);
+    }
+
+    #promoChoices {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .promo-btn {
+      padding: 16px 12px;
+      border: 2px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      background: var(--accent);
+      color: var(--text-primary);
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.18s, border-color 0.18s, transform 0.1s;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .promo-btn:hover  { background: var(--highlight); border-color: var(--highlight); }
+    .promo-btn:active { transform: scale(0.95); }
+
+    /* ------------------------------------------------------------------ */
+    /* Robot-Busy Overlay                                                  */
+    /* ------------------------------------------------------------------ */
+    .board-card { position: relative; }
+
+    #robotBusyOverlay {
+      position: absolute;
+      inset: 0;
+      border-radius: var(--radius);
+      background: rgba(22, 33, 62, 0.78);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 100;
+      backdrop-filter: blur(2px);
+    }
+
+    #robotBusyOverlay p {
+      color: var(--text-primary);
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+
+    .spinner {
+      width: 44px; height: 44px;
+      border: 4px solid rgba(255,255,255,0.15);
+      border-top-color: var(--highlight);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ------------------------------------------------------------------ */
+    /* Game-Over Banner                                                    */
+    /* ------------------------------------------------------------------ */
+    #gameOverBanner {
+      position: fixed;
+      inset: 0;
+      z-index: 300;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #gameOverBackdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+    }
+
+    #gameOverBox {
+      position: relative;
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 32px 36px;
+      text-align: center;
+      z-index: 1;
+      min-width: 260px;
+    }
+
+    #gameOverBox h2 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #ffd700;
+      margin-bottom: 8px;
+    }
+
+    #gameOverBox p {
+      font-size: 1rem;
+      color: var(--text-muted);
+      margin-bottom: 24px;
+      text-transform: capitalize;
+    }
   </style>
 </head>
 <body>
@@ -424,6 +561,12 @@
 
     <!-- Chess board -->
     <div id="board"></div>
+
+    <!-- Robot-busy overlay (lives inside board-card so it covers exactly the card) -->
+    <div id="robotBusyOverlay" hidden>
+      <div class="spinner"></div>
+      <p>Robot is moving&hellip;</p>
+    </div>
 
     <!-- Select-piece mode hint (shown in select mode) -->
     <div class="select-hint" id="selectHint">Tap a piece to select it.</div>
@@ -463,6 +606,30 @@
 
 </div><!-- /.page-wrapper -->
 
+
+<!-- Promotion dialog (shown when a pawn reaches the back rank) -->
+<div id="promoModal" hidden>
+  <div id="promoBackdrop"></div>
+  <div id="promoDialog">
+    <p>Choose promotion piece</p>
+    <div id="promoChoices">
+      <button class="promo-btn" data-promo="q">Queen</button>
+      <button class="promo-btn" data-promo="r">Rook</button>
+      <button class="promo-btn" data-promo="b">Bishop</button>
+      <button class="promo-btn" data-promo="n">Knight</button>
+    </div>
+  </div>
+</div>
+
+<!-- Game-over banner -->
+<div id="gameOverBanner" hidden>
+  <div id="gameOverBackdrop"></div>
+  <div id="gameOverBox">
+    <h2>Game Over</h2>
+    <p id="gameOverReason"></p>
+    <button class="std-btn btn-primary" id="btnGameOverReset">New Game</button>
+  </div>
+</div>
 
 <!-- Dependencies -->
 <script src="https://code.jquery.com/jquery-3.7.1.min.js" crossorigin="anonymous"></script>
@@ -525,18 +692,74 @@
         $('#moveLog').empty();
         moveNumber = 1;
         clearSelection();
+        hideGameOver();
         logEvent('Game reset.');
       } else if (msg.event === 'sync') {
         logEvent('Board synchronised.');
+      } else if (msg.event === 'robot_busy') {
+        $('#robotBusyOverlay').show();
+        logEvent('Robot executing move…');
+      } else if (msg.event === 'robot_idle') {
+        $('#robotBusyOverlay').hide();
+        logEvent('Robot ready.');
+      } else if (msg.event === 'game_over' && msg.reason) {
+        showGameOver(msg.reason);
+        logEvent(`Game over: ${msg.reason}.`);
       }
     });
   }
 
-  function sendMove(from, to) {
+  function sendMove(from, to, promotion) {
     if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ from, to }));
+      const msg = { from, to };
+      if (promotion) msg.promotion = promotion;
+      socket.send(JSON.stringify(msg));
     }
   }
+
+  // Check whether a pawn move is a promotion using chess.js legal-move list.
+  function isPromotion(from, to) {
+    const moves = chess.moves({ square: from, verbose: true });
+    return moves.some(m => m.to === to && m.flags.includes('p'));
+  }
+
+  // Pending promotion: {from, to} waiting for user piece choice.
+  let pendingPromo = null;
+
+  function requestPromotion(from, to) {
+    pendingPromo = { from, to };
+    $('#promoModal').show();
+  }
+
+  $('#promoBackdrop').on('click', () => {
+    pendingPromo = null;
+    $('#promoModal').hide();
+    clearSelection();
+  });
+
+  $('#promoChoices').on('click', '.promo-btn', function () {
+    const piece = $(this).data('promo');
+    $('#promoModal').hide();
+    if (pendingPromo) {
+      sendMove(pendingPromo.from, pendingPromo.to, piece);
+      pendingPromo = null;
+    }
+  });
+
+  // Game-over helpers.
+  function showGameOver(reason) {
+    $('#gameOverReason').text(reason);
+    $('#gameOverBanner').show();
+  }
+
+  function hideGameOver() {
+    $('#gameOverBanner').hide();
+  }
+
+  $('#gameOverBackdrop, #btnGameOverReset').on('click', () => {
+    hideGameOver();
+    $('#btnReset').trigger('click');
+  });
 
   // =========================================================================
   // Board setup
@@ -641,9 +864,14 @@
         clearSelection();
         return;
       }
-      // Second tap — send the move; server validates.
-      sendMove(selectedSquare, square);
-      clearSelection();
+      // Second tap — check for promotion before sending.
+      if (isPromotion(selectedSquare, square)) {
+        requestPromotion(selectedSquare, square);
+        clearSelection();
+      } else {
+        sendMove(selectedSquare, square);
+        clearSelection();
+      }
     }
   }
 
@@ -690,7 +918,11 @@
 
       if (parsed) {
         setVoiceResult(`Heard: "${interim}" → ${parsed.from.toUpperCase()}${parsed.to.toUpperCase()}`, 'parsed');
-        sendMove(parsed.from, parsed.to);
+        if (isPromotion(parsed.from, parsed.to)) {
+          requestPromotion(parsed.from, parsed.to);
+        } else {
+          sendMove(parsed.from, parsed.to);
+        }
       } else {
         setVoiceResult(`Couldn't parse "${interim}". Try "e2 to e4".`, 'error');
       }
@@ -767,17 +999,63 @@
     $('#transcriptBox').html(html);
   }
 
+  // Maps spoken piece names to chess.js piece letters.
+  const PIECE_WORDS = {
+    'king': 'k', 'queen': 'q', 'rook': 'r', 'bishop': 'b',
+    'knight': 'n', 'horse': 'n', 'pawn': 'p',
+  };
+
   /**
-   * Parse a natural-language move utterance into {from, to} UCI squares.
-   * Handles formats like:
-   *   "e2 to e4"  |  "e2e4"  |  "move e2 to e4"  |  "a1 b3"
+   * Resolve a SAN string (e.g. "O-O", "Nf3") to {from, to} using the live
+   * chess.js position, or return null if not found.
+   */
+  function resolveSAN(san) {
+    const moves = chess.moves({ verbose: true });
+    const m = moves.find(mv => mv.san === san);
+    return m ? { from: m.from, to: m.to } : null;
+  }
+
+  /**
+   * Find the unique legal move for a piece type going to a destination square.
+   * Returns null if none or ambiguous.
+   */
+  function resolveByPiece(pieceLetter, toSquare) {
+    const moves = chess.moves({ verbose: true });
+    const matching = moves.filter(m => m.to === toSquare && m.piece === pieceLetter);
+    return matching.length === 1 ? { from: matching[0].from, to: matching[0].to } : null;
+  }
+
+  /**
+   * Parse a natural-language move utterance into {from, to}.
+   * Handles:
+   *   "e2 to e4" | "e2e4" | "move e2 to e4"
+   *   "knight to f3" | "bishop takes e5" | "queen e4"
+   *   "castle" | "castle kingside" | "castle queenside"
    */
   function parseVoiceMove(text) {
-    text = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+    text = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').trim();
+
+    // Castling
+    const isQueenside = /queen.?side|long\s*castl|o\s*o\s*o/.test(text);
+    const isKingside  = !isQueenside && /castl|king.?side|o\s*o/.test(text);
+    if (isQueenside) return resolveSAN('O-O-O');
+    if (isKingside)  return resolveSAN('O-O');
+
+    // Two explicit squares: "e2 to e4", "e2e4", "a1 b3"
     const squares = text.match(/\b[a-h][1-8]\b/g);
     if (squares && squares.length >= 2) {
       return { from: squares[0], to: squares[1] };
     }
+
+    // Piece name + destination: "knight to f3", "bishop takes e5"
+    for (const [word, letter] of Object.entries(PIECE_WORDS)) {
+      if (text.includes(word)) {
+        const destMatch = text.match(/\b([a-h][1-8])\b/);
+        if (destMatch) return resolveByPiece(letter, destMatch[1]);
+        break;
+      }
+    }
+
     return null;
   }
 

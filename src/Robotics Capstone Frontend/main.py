@@ -3,6 +3,7 @@ Accessible Robotic Chess Player — Backend & WebSocket Server
 FastAPI core: validates moves via python-chess, broadcasts FEN, triggers robot.
 """
 
+import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -167,22 +168,80 @@ async def websocket_endpoint(ws: WebSocket):
 
             uci = f"{from_sq}{to_sq}"
 
-            # Handle pawn promotion — default to queen.
+            # Handle pawn promotion — default to queen if client sent no choice.
             if len(data.get("promotion", "")) == 1:
                 uci += data["promotion"]
+
+            # --- Detect special move types on the PRE-PUSH board state ---
+            castling_rook = ep_capture_sq = promo_marker_id = None
+            try:
+                move_obj = chess.Move.from_uci(uci)
+                if move_obj in game.board.legal_moves:
+                    if game.board.is_castling(move_obj):
+                        rank = chess.square_rank(move_obj.from_square)
+                        if game.board.is_kingside_castling(move_obj):
+                            castling_rook = (
+                                chess.square_name(chess.square(7, rank)),  # h-file
+                                chess.square_name(chess.square(5, rank)),  # f-file
+                            )
+                        else:
+                            castling_rook = (
+                                chess.square_name(chess.square(0, rank)),  # a-file
+                                chess.square_name(chess.square(3, rank)),  # d-file
+                            )
+                    if game.board.is_en_passant(move_obj):
+                        ep_capture_sq = chess.square_name(chess.square(
+                            chess.square_file(move_obj.to_square),
+                            chess.square_rank(move_obj.from_square),
+                        ))
+                    if move_obj.promotion is not None:
+                        promo_marker_id = 49 if game.board.turn == chess.WHITE else 50
+            except ValueError:
+                pass  # apply_move will reject malformed UCI below
 
             move = game.apply_move(uci)
 
             if move is not None:
-                # Valid move: broadcast updated FEN to all clients.
+                # Broadcast the updated board to all clients immediately;
+                # the robot move runs concurrently and never delays the UI.
                 await manager.broadcast({"fen": game.fen, "event": "move", "uci": uci})
 
-                # Trigger physical robot movement (non-blocking stub).
-                robot.execute_move(
-                    from_square=from_sq,
-                    to_square=to_sq,
-                    is_capture=game.last_move_was_capture(),
-                )
+                # Detect and broadcast game-over conditions.
+                reason: str | None = None
+                if game.board.is_checkmate():
+                    winner = "black" if game.board.turn == chess.WHITE else "white"
+                    reason = f"checkmate — {winner} wins"
+                elif game.board.is_stalemate():
+                    reason = "stalemate"
+                elif game.board.is_insufficient_material():
+                    reason = "insufficient material"
+                elif game.board.is_seventyfive_moves():
+                    reason = "75-move rule"
+                elif game.board.is_fivefold_repetition():
+                    reason = "fivefold repetition"
+                if reason:
+                    await manager.broadcast(
+                        {"fen": game.fen, "event": "game_over", "reason": reason}
+                    )
+
+                if robot.is_busy:
+                    await manager.broadcast({
+                        "fen": game.fen, "event": "robot_busy", "uci": uci,
+                    })
+                else:
+                    async def _run_and_notify(
+                        fsq=from_sq, tsq=to_sq,
+                        cap=game.last_move_was_capture(),
+                        cr=castling_rook, ep=ep_capture_sq, pm=promo_marker_id,
+                    ):
+                        await robot.execute_move(
+                            from_square=fsq, to_square=tsq, is_capture=cap,
+                            castling_rook=cr, ep_capture_sq=ep,
+                            promo_marker_id=pm,
+                        )
+                        await manager.broadcast({"event": "robot_idle"})
+
+                    asyncio.create_task(_run_and_notify())
             else:
                 # Invalid move: echo the unchanged FEN back to the sender
                 # so chessboard.js performs a visual snapback.
@@ -191,6 +250,31 @@ async def websocket_endpoint(ws: WebSocket):
 
     except WebSocketDisconnect:
         manager.disconnect(ws)
+
+
+# ---------------------------------------------------------------------------
+# Perception WebSocket  (/ws/perception)
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/perception")
+async def perception_endpoint(ws: WebSocket):
+    """
+    Streams the latest ArUco-detected board state to diagnostic clients at ~2 Hz.
+    Payload: {"event": "board_state", "pieces": {"1": "e2", ...}}
+    Connect from any browser tab or debug tool to monitor what the camera sees.
+    """
+    await ws.accept()
+    log.info("Perception client connected.")
+    try:
+        while True:
+            state = robot.get_board_state()
+            await ws.send_text(json.dumps({
+                "event": "board_state",
+                "pieces": {str(k): v for k, v in state.items()},
+            }))
+            await asyncio.sleep(0.5)   # 2 Hz
+    except WebSocketDisconnect:
+        log.info("Perception client disconnected.")
 
 
 # ---------------------------------------------------------------------------
