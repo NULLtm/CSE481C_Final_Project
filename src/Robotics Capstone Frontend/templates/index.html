@@ -9,7 +9,6 @@
         href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css"
         crossorigin="anonymous" />
 
-  <!-- chess.js — client-side move generation for legal-move highlighting -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"
           crossorigin="anonymous"></script>
 
@@ -177,30 +176,64 @@
       touch-action: none;
     }
 
-    /* Ensure [hidden] is never overridden by explicit display rules */
     [hidden] { display: none !important; }
 
-    /* Selected & valid-move square highlights (layered via ::after on the square) */
-    /* position:relative is required so ::after inset:0 is relative to the square */
+    /* Highlight positioning */
     [data-square] { position: relative; }
 
-    [data-square].sq-selected::after,
-    [data-square].sq-valid::after {
+    /* Selected square: Lichess yellowish highlight */
+    [data-square].sq-selected::after {
       content: '';
       position: absolute;
       inset: 0;
       pointer-events: none;
-      border-radius: 3px;
+      border-radius: 0px;
+      background: transparent; /* No yellow tint */
+      box-shadow: inset 0 0 0 4px rgba(128, 128, 128, 0.8); /* Gray border */
     }
 
-    [data-square].sq-selected::after {
-      background: rgba(255, 215, 0, 0.45);
-      box-shadow: inset 0 0 0 3px rgba(255, 200, 0, 0.9);
+    /* Add these new rules for the overlay somewhere in your <style> section: */
+    .board-wrapper {
+      position: relative;
+      width: var(--board-max);
     }
 
+    .board-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(26, 26, 46, 0.8); /* Dark semi-transparent background */
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.3rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+      border-radius: 4px;
+    }
+
+    .board-overlay.active {
+      opacity: 1;
+      pointer-events: auto; /* Catches any stray clicks while locked */
+    }
+
+    /* Valid moves: Lichess gray dot */
     [data-square].sq-valid::after {
-      background: rgba(100, 220, 100, 0.30);
-      box-shadow: inset 0 0 0 3px rgba(80, 200, 80, 0.8);
+      content: '';
+      position: absolute;
+      width: 25%;
+      height: 25%;
+      background: rgba(0, 0, 0, 0.25); 
+      border-radius: 50%;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      box-shadow: none;
+      pointer-events: none; 
     }
 
     /* ------------------------------------------------------------------ */
@@ -534,19 +567,16 @@
 
 <div class="page-wrapper">
 
-  <!-- Header -->
   <header>
     <h1>Robotic Chess</h1>
-    <p id="modeSubtitle">Tap a piece, then tap its destination.</p>
+    <p id="modeSubtitle">Tap or drag a piece to move.</p>
   </header>
 
-  <!-- Connection status -->
   <div class="status-row">
     <div class="status-dot pending" id="statusDot"></div>
     <span id="statusText">Connecting…</span>
   </div>
 
-  <!-- Mode Toggle -->
   <div class="mode-toggle" role="group" aria-label="Input mode">
     <button class="mode-btn active" data-mode="select" id="modeSelectBtn">
       <span class="mode-icon">&#9610;</span> Select Piece
@@ -556,22 +586,15 @@
     </button>
   </div>
 
-  <!-- Board card -->
   <div class="board-card">
 
-    <!-- Chess board -->
-    <div id="board"></div>
-
-    <!-- Robot-busy overlay (lives inside board-card so it covers exactly the card) -->
-    <div id="robotBusyOverlay" hidden>
-      <div class="spinner"></div>
-      <p>Robot is moving&hellip;</p>
+    <div class="board-wrapper">
+      <div id="board"></div>
+      <div id="boardOverlay" class="board-overlay">Robot is moving...</div>
     </div>
 
-    <!-- Select-piece mode hint (shown in select mode) -->
-    <div class="select-hint" id="selectHint">Tap a piece to select it.</div>
+    <div class="select-hint" id="selectHint">Tap or drag a piece to select it.</div>
 
-    <!-- Voice panel (shown in voice mode) -->
     <div class="voice-panel" id="voicePanel" hidden>
       <button class="mic-btn" id="micBtn" aria-label="Hold to speak your move">
         &#127908;
@@ -582,7 +605,6 @@
       </div>
     </div>
 
-    <!-- Info strip -->
     <div class="info-strip">
       <div class="turn-badge">
         <div class="turn-swatch" id="turnSwatch"></div>
@@ -591,47 +613,19 @@
       <span id="moveCount">Move 1</span>
     </div>
 
-    <!-- Controls -->
     <div class="controls">
       <button class="std-btn btn-secondary" id="btnFlip">Flip Board</button>
       <button class="std-btn btn-primary"   id="btnReset">New Game</button>
     </div>
   </div>
 
-  <!-- Move log -->
   <div class="move-log-section">
     <h2>Move Log</h2>
     <div id="moveLog"></div>
   </div>
 
-</div><!-- /.page-wrapper -->
-
-
-<!-- Promotion dialog (shown when a pawn reaches the back rank) -->
-<div id="promoModal" hidden>
-  <div id="promoBackdrop"></div>
-  <div id="promoDialog">
-    <p>Choose promotion piece</p>
-    <div id="promoChoices">
-      <button class="promo-btn" data-promo="q">Queen</button>
-      <button class="promo-btn" data-promo="r">Rook</button>
-      <button class="promo-btn" data-promo="b">Bishop</button>
-      <button class="promo-btn" data-promo="n">Knight</button>
-    </div>
-  </div>
 </div>
 
-<!-- Game-over banner -->
-<div id="gameOverBanner" hidden>
-  <div id="gameOverBackdrop"></div>
-  <div id="gameOverBox">
-    <h2>Game Over</h2>
-    <p id="gameOverReason"></p>
-    <button class="std-btn btn-primary" id="btnGameOverReset">New Game</button>
-  </div>
-</div>
-
-<!-- Dependencies -->
 <script src="https://code.jquery.com/jquery-3.7.1.min.js" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"
         crossorigin="anonymous"></script>
@@ -639,6 +633,14 @@
 <script>
 (function () {
   'use strict';
+
+  // =========================================================================
+  // State
+  // =========================================================================
+  let isBoardLocked = false;
+  let currentMode = 'select'; // 'select' | 'voice'
+  let selectedSquare = null;
+  let moveNumber = 1;
 
   // =========================================================================
   // WebSocket
@@ -676,9 +678,13 @@
       let msg;
       try { msg = JSON.parse(evt.data); } catch { return; }
 
+      // Unlock board upon receiving any valid server response
+      isBoardLocked = false;
+      $('#boardOverlay').removeClass('active'); 
+
       if (msg.fen) {
-        board.position(msg.fen, true);
-        chess.load(msg.fen);   // keep local chess.js in sync for move highlighting
+        board.position(msg.fen, false); // false = instant snap to new FEN
+        chess.load(msg.fen);   
         updateTurnDisplay(msg.fen);
       }
 
@@ -711,101 +717,79 @@
 
   function sendMove(from, to, promotion) {
     if (socket && socket.readyState === WebSocket.OPEN) {
-      const msg = { from, to };
-      if (promotion) msg.promotion = promotion;
-      socket.send(JSON.stringify(msg));
+      isBoardLocked = true; // Lock the board!
+      $('#boardOverlay').addClass('active'); // Turn on overlay
+      socket.send(JSON.stringify({ from, to }));
     }
   }
-
-  // Check whether a pawn move is a promotion using chess.js legal-move list.
-  function isPromotion(from, to) {
-    const moves = chess.moves({ square: from, verbose: true });
-    return moves.some(m => m.to === to && m.flags.includes('p'));
-  }
-
-  // Pending promotion: {from, to} waiting for user piece choice.
-  let pendingPromo = null;
-
-  function requestPromotion(from, to) {
-    pendingPromo = { from, to };
-    $('#promoModal').show();
-  }
-
-  $('#promoBackdrop').on('click', () => {
-    pendingPromo = null;
-    $('#promoModal').hide();
-    clearSelection();
-  });
-
-  $('#promoChoices').on('click', '.promo-btn', function () {
-    const piece = $(this).data('promo');
-    $('#promoModal').hide();
-    if (pendingPromo) {
-      sendMove(pendingPromo.from, pendingPromo.to, piece);
-      pendingPromo = null;
-    }
-  });
-
-  // Game-over helpers.
-  function showGameOver(reason) {
-    $('#gameOverReason').text(reason);
-    $('#gameOverBanner').show();
-  }
-
-  function hideGameOver() {
-    $('#gameOverBanner').hide();
-  }
-
-  $('#gameOverBackdrop, #btnGameOverReset').on('click', () => {
-    hideGameOver();
-    $('#btnReset').trigger('click');
-  });
 
   // =========================================================================
   // Board setup
   // =========================================================================
-  let moveNumber = 1;
+  const chess = new Chess();
 
   const config = {
-    draggable : false,          // disabled by default; enabled in select mode below
+    draggable : true,           // Enables picking up pieces
+    moveSpeed : 'fast',         // Speeds up UI animation
+    snapbackSpeed: 1,
+    snapSpeed: 1,
     position  : 'start',
     pieceTheme: 'https://lichess1.org/assets/piece/cburnett/{piece}.svg',
 
-    onDrop: function (source, target) {
-      sendMove(source, target);
-      return 'snapback';
+    onDragStart: function (source, piece, position, orientation) {
+      // Prevent drag if board is locked, mode is wrong, or disconnected
+      if (isBoardLocked || currentMode !== 'select' || !socket || socket.readyState !== WebSocket.OPEN) {
+        return false;
+      }
+      
+      if ((chess.turn() === 'w' && piece.search(/^b/) !== -1) ||
+          (chess.turn() === 'b' && piece.search(/^w/) !== -1)) {
+        return false;
+      }
+
+      // Clear any previous highlights from tapping before we start dragging
+      clearSelection();
+
+      // Highlight the piece being dragged and its legal moves
+      selectPiece(source);
     },
 
-    onDragStart: function () {
-      return currentMode === 'select' && socket && socket.readyState === WebSocket.OPEN;
+    onDrop: function (source, target) {
+      // If dropped on the same square, let handleSquareClick manage click-to-move
+      if (source === target) return; 
+
+      // Check if move is locally valid using chess.js before sending to server
+      const legalMoves = chess.moves({ verbose: true });
+      const isValid = legalMoves.some(m => m.from === source && m.to === target);
+
+      if (!isValid) {
+        clearSelection();
+        return 'snapback'; // Invalid move, snap piece back
+      }
+
+      // Move is valid, send to server
+      sendMove(source, target);
+      clearSelection();
     },
   };
 
   const board = Chessboard('board', config);
   $(window).resize(() => board.resize());
 
-  // chess.js instance — kept in sync with server FEN for legal-move calculation.
-  // It is never used to validate moves; the server remains the source of truth.
-  const chess = new Chess();
-
   // =========================================================================
-  // Mode state
+  // Mode Selection
   // =========================================================================
-  let currentMode = 'select'; // 'select' | 'voice'
-
   const SUBTITLES = {
-    select: 'Tap a piece, then tap its destination.',
+    select: 'Tap or drag a piece to move.',
     voice:  'Use voice commands to make your move.',
   };
 
   function switchMode(mode) {
     currentMode = mode;
 
-    // Toggle button active states.
     $('.mode-btn').removeClass('active');
     $(`.mode-btn[data-mode="${mode}"]`).addClass('active');
 
-    // Show/hide panels (using jQuery show/hide so CSS display rules can't override).
     if (mode === 'voice') {
       $('#voicePanel').show();
       $('#selectHint').hide();
@@ -814,10 +798,8 @@
       $('#selectHint').show();
     }
 
-    // Update subtitle.
     $('#modeSubtitle').text(SUBTITLES[mode]);
 
-    // Reset interaction state.
     clearSelection();
     stopListening();
   }
@@ -827,12 +809,8 @@
   });
 
   // =========================================================================
-  // SELECT PIECE MODE
+  // SELECT PIECE MODE (Tap to Move)
   // =========================================================================
-  let selectedSquare = null;
-
-  // Intercept clicks on chessboard squares (chessboard.js renders [data-square]).
-  // Using event delegation on the board wrapper.
   $('#board').on('click', '[data-square]', function () {
     if (currentMode !== 'select') return;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
@@ -842,37 +820,42 @@
   });
 
   function handleSquareClick(square) {
+    if (isBoardLocked) return; // Ignore clicks if waiting for server
+
+    const pos = board.position();
+    const isOwnPiece = pos[square] && pos[square][0] === chess.turn();
+
     if (selectedSquare === null) {
-      // First tap — only select a piece that belongs to the player whose turn it is.
-      const pos = board.position();
-      if (!pos[square]) return;                       // empty square
-      if (pos[square][0] !== chess.turn()) return;    // opponent's piece — ignore silently
-
-      selectedSquare = square;
-      highlightSquare(square, 'selected');
-
-      // Highlight all legal destination squares using chess.js move generation.
-      const legalMoves = chess.moves({ square, verbose: true });
-      legalMoves.forEach(m => highlightSquare(m.to, 'valid'));
-
-      const count = legalMoves.length;
-      $('#selectHint').addClass('active')
-        .text(`${square.toUpperCase()} selected — ${count} move${count !== 1 ? 's' : ''} available. Tap destination.`);
+      // First click: select if it's our piece
+      if (!isOwnPiece) return;
+      selectPiece(square);
     } else {
+      // Second click
       if (square === selectedSquare) {
-        // Tapped same square again: deselect.
+        // Tapped the same piece again -> deselect
         clearSelection();
-        return;
-      }
-      // Second tap — check for promotion before sending.
-      if (isPromotion(selectedSquare, square)) {
-        requestPromotion(selectedSquare, square);
+      } else if (isOwnPiece) {
+        // Tapped another of our own pieces -> switch selection
         clearSelection();
+        selectPiece(square);
       } else {
+        // Tapped an empty square or enemy piece -> attempt move
         sendMove(selectedSquare, square);
         clearSelection();
       }
     }
+  }
+
+  function selectPiece(square) {
+    selectedSquare = square;
+    highlightSquare(square, 'selected');
+
+    const legalMoves = chess.moves({ square, verbose: true });
+    legalMoves.forEach(m => highlightSquare(m.to, 'valid'));
+
+    const count = legalMoves.length;
+    $('#selectHint').addClass('active')
+      .text(`${square.toUpperCase()} selected — ${count} move${count !== 1 ? 's' : ''} available.`);
   }
 
   function highlightSquare(square, type) {
@@ -882,7 +865,7 @@
   function clearSelection() {
     selectedSquare = null;
     $('[data-square]').removeClass('sq-selected sq-valid');
-    $('#selectHint').removeClass('active').text('Tap a piece to select it.');
+    $('#selectHint').removeClass('active').text('Tap or drag a piece to select it.');
   }
 
   // =========================================================================
@@ -903,13 +886,11 @@
       const results = evt.results[evt.results.length - 1];
       const interim = results[0].transcript;
 
-      // Show interim transcript while speaking.
       if (!results.isFinal) {
         setVoiceResult(`"${interim}"`, 'heard');
         return;
       }
 
-      // Try each alternative until one parses.
       let parsed = null;
       for (let i = 0; i < results.length; i++) {
         parsed = parseVoiceMove(results[i].transcript);
@@ -946,6 +927,10 @@
   $('#micBtn').on('click', () => {
     if (!SpeechRecognition) {
       setVoiceResult('Speech recognition is not supported in this browser.', 'error');
+      return;
+    }
+    if (isBoardLocked) {
+      setVoiceResult('Waiting for server...', 'hint');
       return;
     }
     if (listening) {
@@ -987,51 +972,16 @@
     }
   }
 
-  // Display a result line in the transcript box.
-  // type: 'heard' | 'parsed' | 'error' | 'hint' | null (raw HTML)
   function setVoiceResult(text, type) {
     if (currentMode !== 'voice') return;
     let html;
     if (type === 'heard')  html = `<span class="heard-text">${escHtml(text)}</span>`;
     else if (type === 'parsed') html = `<span class="parsed-move">${escHtml(text)}</span>`;
     else if (type === 'error')  html = `<span class="error-text">${escHtml(text)}</span>`;
-    else                        html = text; // raw / hint
+    else                        html = text;
     $('#transcriptBox').html(html);
   }
 
-  // Maps spoken piece names to chess.js piece letters.
-  const PIECE_WORDS = {
-    'king': 'k', 'queen': 'q', 'rook': 'r', 'bishop': 'b',
-    'knight': 'n', 'horse': 'n', 'pawn': 'p',
-  };
-
-  /**
-   * Resolve a SAN string (e.g. "O-O", "Nf3") to {from, to} using the live
-   * chess.js position, or return null if not found.
-   */
-  function resolveSAN(san) {
-    const moves = chess.moves({ verbose: true });
-    const m = moves.find(mv => mv.san === san);
-    return m ? { from: m.from, to: m.to } : null;
-  }
-
-  /**
-   * Find the unique legal move for a piece type going to a destination square.
-   * Returns null if none or ambiguous.
-   */
-  function resolveByPiece(pieceLetter, toSquare) {
-    const moves = chess.moves({ verbose: true });
-    const matching = moves.filter(m => m.to === toSquare && m.piece === pieceLetter);
-    return matching.length === 1 ? { from: matching[0].from, to: matching[0].to } : null;
-  }
-
-  /**
-   * Parse a natural-language move utterance into {from, to}.
-   * Handles:
-   *   "e2 to e4" | "e2e4" | "move e2 to e4"
-   *   "knight to f3" | "bishop takes e5" | "queen e4"
-   *   "castle" | "castle kingside" | "castle queenside"
-   */
   function parseVoiceMove(text) {
     text = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').trim();
 
@@ -1099,7 +1049,7 @@
     fetch('/reset', { method: 'POST' })
       .then(r => r.json())
       .then(data => {
-        if (data.fen) { board.position(data.fen, true); updateTurnDisplay(data.fen); }
+        if (data.fen) { board.position(data.fen, false); updateTurnDisplay(data.fen); }
       })
       .catch(() => logEvent('Reset request failed.'));
   });
@@ -1108,7 +1058,7 @@
   // Boot
   // =========================================================================
   connect();
-  switchMode('select'); // start in select-piece mode
+  switchMode('select');
 
 })();
 </script>

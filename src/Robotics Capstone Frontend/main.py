@@ -117,7 +117,7 @@ templates = Jinja2Templates(directory="templates")
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Serve the tablet UI."""
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html", {"your_other_vars": "values"})
 
 
 @app.get("/fen")
@@ -149,6 +149,7 @@ async def websocket_endpoint(ws: WebSocket):
     try:
         while True:
             raw = await ws.receive_text()
+            print("RECEIVED MOVE")
 
             try:
                 data = json.loads(raw)
