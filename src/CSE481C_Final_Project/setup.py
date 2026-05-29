@@ -17,14 +17,14 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='Your Name',
-    maintainer_email='your_email@example.com',
-    description='TODO: Package description',
+    maintainer='Owen Boseley',
+    maintainer_email='nulltm01@gmail.com',
+    description='A ROS2 Package to Play Chess!',
     license='TODO: License declaration',
     # tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'aruco_node = aaso_final_project.aruco_node:main'
+            'AutoChess = aaso_final_project.AutoChess:main'
         ],
     },
 )
