@@ -12,6 +12,7 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
         # Include the config folder
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml')), 
     ],
@@ -24,7 +25,8 @@ setup(
     # tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'AutoChess = aaso_final_project.AutoChess:main'
+            'AutoChess = aaso_final_project.AutoChess:main',
+            'aruco_test = aaso_final_project.aruco_test:main'
         ],
     },
 )
