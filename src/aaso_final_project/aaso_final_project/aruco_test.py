@@ -646,16 +646,24 @@ class DetectArucoNode(Node):
 
         self.aruco_marker_collection = ArucoMarkerCollection(self.marker_info, self.show_debug_images)
 
-        self.rgb_topic_name = '/camera/color/image_raw' #'/camera/infra1/image_rect_raw'
+
+        # /gripper_camera/color/camera_info
+        # /gripper_camera/color/image_rect_raw
+        # /gripper_camera/aligned_depth_to_color/image_raw
+
+        self.rgb_topic_name = '/gripper_camera/color/image_rect_raw' #'/camera/infra1/image_rect_raw'
+        # self.rgb_topic_name = '/camera/color/image_raw' #'/camera/infra1/image_rect_raw'
         self.rgb_image_subscriber = message_filters.Subscriber(self, Image, self.rgb_topic_name)
 
-        self.depth_topic_name = '/camera/aligned_depth_to_color/image_raw'
+        self.depth_topic_name = '/gripper_camera/aligned_depth_to_color/image_raw'
+        # self.depth_topic_name = '/camera/aligned_depth_to_color/image_raw'
         self.depth_image_subscriber = message_filters.Subscriber(self, Image, self.depth_topic_name)
 
         # TODO: This is unlikely to ever change, so it probably
         # doesn't make sense to deal with the overhead of
         # synchronizing it with other input.
-        self.camera_info_subscriber = message_filters.Subscriber(self, CameraInfo, '/camera/color/camera_info')
+        self.camera_info_subscriber = message_filters.Subscriber(self, CameraInfo, '/gripper_camera/color/camera_info')
+        # self.camera_info_subscriber = message_filters.Subscriber(self, CameraInfo, '/camera/color/camera_info')
 
         self.synchronizer = message_filters.TimeSynchronizer([self.rgb_image_subscriber, self.depth_image_subscriber, self.camera_info_subscriber], 10)
         self.synchronizer.registerCallback(self.image_callback)
