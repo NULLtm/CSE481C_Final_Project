@@ -10,6 +10,9 @@ import click
 from rclpy.node import Node
 from rclpy.duration import Duration
 
+import json
+from std_msgs.msg import String
+
 import message_filters
 from std_msgs.msg import Header
 from sensor_msgs.msg import Image
@@ -675,6 +678,8 @@ class DetectArucoNode(Node):
         self.wrist_top_marker_pub = self.create_publisher(Marker, '/aruco/wrist_top', 1)
         self.wrist_inside_marker_pub = self.create_publisher(Marker, '/aruco/wrist_inside', 1)
 
+        self.current_markers_pub = self.create_publisher(String, '/aruco/current', 1)
+
         self.tf_broadcaster = TransformBroadcaster(self)
 
     def image_callback(self, ros_rgb_image, ros_depth_image, rgb_camera_info):
@@ -721,6 +726,12 @@ class DetectArucoNode(Node):
                 self.wrist_inside_marker_pub.publish(m)
             if m.text == 'wrist_top':
                 self.wrist_top_marker_pub.publish(m)
+
+        
+        current_names = [m.text for m in marker_array.markers if m.text]
+        current_names_msg = String()
+        current_names_msg.data = json.dumps(current_names)
+        self.current_markers_pub.publish(current_names_msg)
             
         if self.publish_marker_point_clouds: 
             for marker in self.aruco_marker_collection:
