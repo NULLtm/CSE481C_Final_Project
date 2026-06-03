@@ -26,7 +26,8 @@ setup(
     entry_points={
         'console_scripts': [
             'AutoChess = aaso_final_project.AutoChess:main',
-            'aruco_test = aaso_final_project.aruco_test:main'
+            'aruco_test = aaso_final_project.aruco_test:main',
+            'align_test = aaso_final_project.align_test:main'
         ],
     },
 )
