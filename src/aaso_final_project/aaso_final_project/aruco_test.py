@@ -636,13 +636,23 @@ class DetectArucoNode(Node):
         # in a dictionary called marker_info
         param_dict = self.get_parameters_by_prefix('aruco_marker_info')
         self.marker_info = {}
-        for key in param_dict:
-            try:
-                self.marker_info[key.split('.')[0]][key.split('.')[1]] = self.get_parameter_or('aruco_marker_info.{}'.format(key)).value
-            except KeyError:
-                self.marker_info[key.split('.')[0]] = {}
-                self.marker_info[key.split('.')[0]][key.split('.')[1]] = self.get_parameter_or('aruco_marker_info.{}'.format(key)).value
-
+        
+        for key, param_obj in param_dict.items():
+            parts = key.split('.')
+            
+            # Skip parent group keys (like '42' or 'default') that have no sub-properties
+            if len(parts) < 2:
+                continue 
+                
+            marker_id = parts[0]
+            param_name = parts[1]
+            
+            # Initialize the nested dictionary if it doesn't exist yet
+            if marker_id not in self.marker_info:
+                self.marker_info[marker_id] = {}
+                
+            # Assign the value directly from the parameter object
+            self.marker_info[marker_id][param_name] = param_obj.value
 
 
         # TODO ADD THE GRIPPER CAMERA TOPICS TO THIS.

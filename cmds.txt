@@ -5,14 +5,15 @@ cd ~/ament_ws/src/stretch_ros2/stretch_core
 FOR GRIPPER CAMERA:
 ros2 launch stretch_core d405_basic.launch.py
 
-
 GRIPPER ARUCO MARKER TRANSFORM TREE TEST SUITE:
 -----------
 ros2 launch stretch_core d405_basic.launch.py
 
 ros2 launch stretch_core stretch_driver.launch.py
 
-ros2 launch CSE481C_Final_Project aruco_test.launch.py
+ros2 launch aaso_final_project aruco_test.launch.py
+
+ros2 run rviz2 rviz2 -d /home/hello-robot/ament_ws/src/stretch_tutorials/rviz/aruco_detector_example.rviz
 -----------
 
 Homing Robot:
