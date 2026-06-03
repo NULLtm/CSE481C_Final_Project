@@ -1,0 +1,6 @@
+# Request (Client -> Server)
+# Should be [a-h][1-8]
+string pos
+---
+# Response (Server -> Client)
+string message
