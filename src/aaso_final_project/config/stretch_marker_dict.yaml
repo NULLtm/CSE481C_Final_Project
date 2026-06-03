@@ -207,4 +207,52 @@
         name: 'Rank1'
         link: 'None'
       '42':
-        length_
+        length_mm: 27
+        use_rgb_only: False
+        name: 'Rank2'
+        link: 'None'
+      '43':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'Rank3'
+        link: 'None'
+      '44':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'Rank4'
+        link: 'None'
+      '45':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'Rank5'
+        link: 'None'
+      '46':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'Rank6'
+        link: 'None'
+      '47':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'Rank7'
+        link: 'None'
+      '48':
+        length_mm: 27
+        use_rgb_only: False
+        name: 'Rank8'
+        link: 'None'
+      '49':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'WhitePromo'
+        link: 'None'
+      '50':
+        length_mm: 25
+        use_rgb_only: False
+        name: 'BlackPromo'
+        link: 'None'
+      'default':
+        length_mm: 24
+        use_rgb_only: False
+        name: 'unknown'
+        link: 'None'
