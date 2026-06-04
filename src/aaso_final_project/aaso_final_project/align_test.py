@@ -1,5 +1,6 @@
 import rclpy
 from std_srvs.srv import Trigger
+from interfaces.srv import Align
 import hello_helpers.hello_misc as hm
 
 class AutoChess(hm.HelloNode):
@@ -8,9 +9,9 @@ class AutoChess(hm.HelloNode):
         hm.HelloNode.__init__(self)
        
         # --- CONFIGURATION ---
-        self.aruco_frame = 'Rank8'
+        # self.aruco_frame = 'Rank8'
         self.robot_frame = 'base_link'
-        self.desired_distance_offset = 1.19
+        self.desired_distance_offset = 0
 
     def main(self):
         # 1. Initialize HelloNode (This automatically sets up TF listeners and joint state subscribers!)
@@ -23,12 +24,12 @@ class AutoChess(hm.HelloNode):
 
         # 2. Setup Custom Trigger Service
         self.trigger_service = self.create_service(
-            Trigger,
-            'move_rank_8',
+            Align,
+            'align',
             self.align_base_callback
         )
 
-        self.get_logger().info('Ready! Call /move_rank_8 to align to the marker.')
+        self.get_logger().info('Ready! Call /align to align to the marker.')
 
         # 3. Spin the node
         try:
@@ -62,12 +63,12 @@ class AutoChess(hm.HelloNode):
 
         # Failsafe 2: Use HelloNode's built-in TF lookup
         try:
-            transform_stamped = self.get_tf(self.robot_frame, self.aruco_frame)
+            transform_stamped = self.get_tf(self.robot_frame, request.pos)
             if transform_stamped is None:
                 raise ValueError("Transform is unavailable.")
         except Exception as ex:
             response.success = False
-            response.message = f'Could not find ArUco marker "{self.aruco_frame}". Is it in view?'
+            response.message = f'Could not find ArUco marker "{request.pos}". Is it in view?'
             self.get_logger().error(f'{response.message} Details: {ex}')
             return response
 
