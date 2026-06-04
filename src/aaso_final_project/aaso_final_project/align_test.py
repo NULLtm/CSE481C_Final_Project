@@ -56,7 +56,6 @@ class AutoChess(hm.HelloNode):
 
         # Failsafe 1: Check Joint States (Populated automatically by HelloNode)
         if self.joint_state is None:
-            response.success = False
             response.message = 'No joint states available yet.'
             self.get_logger().error(response.message)
             return response
@@ -67,7 +66,6 @@ class AutoChess(hm.HelloNode):
             if transform_stamped is None:
                 raise ValueError("Transform is unavailable.")
         except Exception as ex:
-            response.success = False
             response.message = f'Could not find ArUco marker "{request.pos}". Is it in view?'
             self.get_logger().error(f'{response.message} Details: {ex}')
             return response
@@ -96,7 +94,6 @@ class AutoChess(hm.HelloNode):
         self.move_to_pose({'translate_mobile_base': target_base}, blocking=False)
 
         # Return success immediately
-        response.success = True
         response.message = f'Aligning to marker. Moving {move_distance:.3f}m.'
         return response
     
