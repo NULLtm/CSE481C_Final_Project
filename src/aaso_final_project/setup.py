@@ -26,7 +26,7 @@ setup(
     entry_points={
         'console_scripts': [
             'chess_driver = aaso_final_project.chess_driver:main',
-            'aruco_test = aaso_final_project.aruco_driver:main'
+            'aruco_driver = aaso_final_project.aruco_driver:main'
         ],
     },
 )

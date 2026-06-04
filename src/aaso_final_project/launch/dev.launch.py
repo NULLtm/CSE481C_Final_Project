@@ -10,16 +10,13 @@ def generate_launch_description():
     stretch_core_dir = get_package_share_directory('stretch_core')
     aaso_project_dir = get_package_share_directory('aaso_final_project')
 
-    pkg_stretch_tutorials = get_package_share_directory('stretch_tutorials')
-    rviz_config_path = os.path.join(pkg_stretch_tutorials, 'rviz', 'aruco_detector_example.rviz')
-
-    rviz_node = Node(
-        package='rviz2',
-        executable='rviz2',
-        name='rviz2',
-        arguments=['-d', rviz_config_path],
-        output='screen'
-    )
+    # rviz_node = Node(
+    #     package='rviz2',
+    #     executable='rviz2',
+    #     name='rviz2',
+    #     arguments=['-d', '/home/hello-robot/ament_ws/src/stretch_tutorials/rviz/aruco_detector_example.rviz'],
+    #     output='screen'
+    # )
 
     return LaunchDescription([
         # 1. ros2 launch stretch_core d405_basic.launch.py
@@ -41,7 +38,7 @@ def generate_launch_description():
             PythonLaunchDescriptionSource(
                 os.path.join(aaso_project_dir, 'launch', 'aruco_driver.launch.py')
             )
-        ),
+        )
 
-        rviz_node
+        # //rviz_node
     ])
