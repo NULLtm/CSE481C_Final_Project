@@ -48,7 +48,7 @@ class ArucoMarker:
         bgr = id_color_image[0,0]
         self.id_color = [bgr[2], bgr[1], bgr[0]]
         
-        self.frame_id = 'camera_color_optical_frame'
+        self.frame_id = 'gripper_camera_color_optical_frame'
         self.info = marker_info.get(str(self.aruco_id), None)
 
         if self.info is None:
@@ -772,7 +772,7 @@ class DetectArucoNode(Node):
         
     def publish_point_cloud(self):
         header = Header()
-        header.frame_id = 'camera_color_optical_frame'
+        header.frame_id = 'gripper_camera_color_optical_frame'
         header.stamp = self.get_clock().now().to_msg()
         fields = [PointField('x', 0, PointField.FLOAT32, 1),
                   PointField('y', 4, PointField.FLOAT32, 1),
