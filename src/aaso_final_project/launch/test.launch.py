@@ -28,13 +28,13 @@ def generate_launch_description():
         # 3. ros2 launch aaso_final_project aruco_test.launch.py
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
-                os.path.join(aaso_project_dir, 'launch', 'aruco_test.launch.py')
+                os.path.join(aaso_project_dir, 'launch', 'aruco_driver.launch.py')
             )
         ),
 
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
-                os.path.join(aaso_project_dir, 'launch', 'align_test.launch.py')
+                os.path.join(aaso_project_dir, 'launch', 'chess_driver.launch.py')
             )
         )
     ])

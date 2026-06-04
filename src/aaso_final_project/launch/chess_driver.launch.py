@@ -10,13 +10,10 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 def generate_launch_description():
 
-    dict_file_path = os.path.join(get_package_share_directory('aaso_final_project'), 'config', 'stretch_marker_dict.yaml')
-
     detect_aruco_markers = Node(
         package='aaso_final_project',
-        executable='aruco_test',
+        executable='chess_driver',
         output='screen',
-        parameters=[dict_file_path],
         )
 
     return LaunchDescription([

@@ -25,9 +25,8 @@ setup(
     # tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'AutoChess = aaso_final_project.AutoChess:main',
-            'aruco_test = aaso_final_project.aruco_test:main',
-            'align_test = aaso_final_project.align_test:main'
+            'chess_driver = aaso_final_project.chess_driver:main',
+            'aruco_test = aaso_final_project.aruco_driver:main'
         ],
     },
 )
