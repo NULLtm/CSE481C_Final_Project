@@ -68,6 +68,13 @@ class ChessDriver(Node):
             callback_group=self.cb_group
         )
 
+        self.take_service = self.create_service(
+            Move,
+            '/chess/take',
+            self.take_callback,
+            callback_group=self.cb_group
+        )
+
         self.align_service = self.create_service(
             Align,
             '/chess/align',
@@ -224,6 +231,26 @@ class ChessDriver(Node):
         if self.drop(response):
             response.message = f"Successfully moved piece."
         return response
+    
+    def take_callback(self, request, response):
+        if self.move_to_square(request.end_file, request.end_rank, response=response) is False:
+            return response
+
+        # grab
+        if self.grab(response) is False:
+            return response        
+
+        # move close to discard zone
+        if self.move_to_square("H", "5", response=response) is False:
+            return response
+        
+        if self.gripper_discard_position(response=response) is False:
+            return response
+        
+        # drop
+        if self.drop(response):
+            response.message = f"Successfully moved piece."
+        return response
 
     def open_gripper(self, response):
         self.get_logger().info("Opening gripper...")
@@ -236,6 +263,18 @@ class ChessDriver(Node):
         if not success:
             response.message = "Gripper failed to open."
             response.success = False 
+        return success
+    
+    def gripper_discard_position(self, response):
+        self.get_logger().info("Discard positioning gripper...")
+        success = self.execute_trajectory(
+            ['wrist_extension', 'joint_wrist_yaw', 'joint_wrist_pitch'],
+            [0.5, 0, 0],
+            duration_sec=6.0
+        )
+        if not success:
+            response.message = "Gripper failed to go into discard position."
+            response.success = False
         return success
     
     def close_gripper(self, response):
