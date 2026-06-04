@@ -1,7 +1,9 @@
 # Request (Client -> Server)
 # Should be [a-h][1-8]
-string rank
-string file
+string startRank
+string startFile
+string endRank
+string endFile
 ---
 # Response (Server -> Client)
 string message
