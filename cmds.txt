@@ -2,8 +2,10 @@ ssh -X hello-robot@rocky.hcrlab.cs.washington.edu
 
 cd ~/ament_ws/src/stretch_ros2/stretch_core
 
+source install/setup.bash
+
 ros2 service call /move_rank_8 interfaces/srv/Align
-ros2 service call /align interfaces/srv/Align "{pos: 'your_string_here'}"
+ros2 service call /align interfaces/srv/Align "{pos: 'Rank6'}"
 
 FOR GRIPPER CAMERA:
 ros2 launch stretch_core d405_basic.launch.py
@@ -15,6 +17,8 @@ ros2 launch stretch_core d405_basic.launch.py
 ros2 launch stretch_core stretch_driver.launch.py
 
 ros2 launch aaso_final_project aruco_test.launch.py
+
+ros2 run aaso_final_project align_test
 
 ros2 run rviz2 rviz2 -d /home/hello-robot/ament_ws/src/stretch_tutorials/rviz/aruco_detector_example.rviz
 -----------
