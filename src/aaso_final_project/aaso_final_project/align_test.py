@@ -53,6 +53,7 @@ class AutoChess(hm.HelloNode):
         self.get_logger().info('Moving arm to 0.0 (fully inward)...')
         wrist_future = self.move_to_pose({'wrist_extension': 0.0}, blocking=False)
         rclpy.spin_until_future_complete(self, wrist_future)
+        self.get_logger().info(f"checking if wrist_future is done: {wrist_future.done}")
         self.get_logger().info('Arm retracted. Proceeding to base alignment.')
 
         # Failsafe 1: Check Joint States (Populated automatically by HelloNode)
