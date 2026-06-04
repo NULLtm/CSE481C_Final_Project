@@ -99,7 +99,11 @@ class AutoChess(hm.HelloNode):
         response.success = True
         response.message = f'Aligning to marker. Moving {move_distance:.3f}m.'
         return response
+    
 
-if __name__ == '__main__':
+def main(args=None):
     node = AutoChess()
     node.main()
+
+if __name__ == '__main__':
+    main()
