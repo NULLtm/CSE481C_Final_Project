@@ -1,3 +1,52 @@
+Hi,
+
+How to do development (currently)
+--------------------
+
+SETUP:
+ssh -X hello-robot@rocky.hcrlab.cs.washington.edu
+cd ~/aaso_ws
+git pull
+colcon build
+source install/setup.bash
+
+LAUNCH BACKEND:
+ros2 launch aaso_final_project dev.launch.py
+
+# IMPORTANT -- DO THIS
+ros2 service call /home_the_robot std_srvs/srv/Trigger
+
+LAUNCH KEYBOARD TELEOP (optional):
+ros2 run stretch_core keyboard_teleop
+
+LAUNCH CHESS DRIVER:
+ros2 launch aaso_final_project chess_driver.launch.py
+
+LAUNCH WEB INTERFACE:
+cd ~/aaso/src/front-back-connection-test1
+python3 app.py
+
+Go to the website provided and enjoy.
+
+------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ssh -X hello-robot@rocky.hcrlab.cs.washington.edu
 
 cd ~/ament_ws/src/stretch_ros2/stretch_core

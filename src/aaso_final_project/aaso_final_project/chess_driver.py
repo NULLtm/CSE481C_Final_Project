@@ -209,7 +209,7 @@ class ChessDriver(Node):
         # TODO input validation
 
         # move to first square
-        if self.move_to_square(request.startFile, request.startRank, response=response) is False:
+        if self.move_to_square(request.start_file, request.start_rank, response=response) is False:
             return response
 
         # grab
@@ -217,7 +217,7 @@ class ChessDriver(Node):
             return response        
 
         # move to first square
-        if self.move_to_square(request.endFile, request.endRank, response=response) is False:
+        if self.move_to_square(request.end_file, request.end_rank, response=response) is False:
             return response
         
         # drop
