@@ -9,6 +9,7 @@ find_package(builtin_interfaces REQUIRED)
 
 set(srv_files
   "srv/AlgNotation.srv"
+  "srv/Align.srv"
 )
 
 rosidl_generate_interfaces(${PROJECT_NAME}
