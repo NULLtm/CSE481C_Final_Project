@@ -2,6 +2,8 @@ ssh -X hello-robot@rocky.hcrlab.cs.washington.edu
 
 cd ~/ament_ws/src/stretch_ros2/stretch_core
 
+ros2 service call /move_rank_8 std_srvs/srv/Trigger
+
 FOR GRIPPER CAMERA:
 ros2 launch stretch_core d405_basic.launch.py
 

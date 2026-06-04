@@ -10,7 +10,7 @@ class AutoChess(hm.HelloNode):
         # --- CONFIGURATION ---
         self.aruco_frame = 'Rank8'
         self.robot_frame = 'base_link'
-        self.desired_distance_offset = 0.50
+        self.desired_distance_offset = 1.19
 
     def main(self):
         # 1. Initialize HelloNode (This automatically sets up TF listeners and joint state subscribers!)
