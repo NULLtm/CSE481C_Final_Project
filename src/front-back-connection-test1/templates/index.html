@@ -3,66 +3,166 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Robot Rank Control</title>
+    <title>Robot Control Panel</title>
     <style>
         body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f0f0f0; }
-        .container { text-align: center; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        input { padding: 0.5rem; font-size: 1rem; width: 60px; margin-right: 1rem; }
-        button { padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer; background-color: #007bff; color: white; border: none; border-radius: 4px; }
-        button:disabled { background-color: #ccc; }
+        .container { text-align: center; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); min-width: 350px; }
+        
+        .form-group { margin-bottom: 1.5rem; }
+        select, button { padding: 0.5rem; font-size: 1rem; margin: 0.2rem; border-radius: 4px; }
+        select { border: 1px solid #ccc; }
+        
+        button { cursor: pointer; background-color: #007bff; color: white; border: none; padding: 0.5rem 1.5rem; transition: background-color 0.2s; }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        
+        .control-panel { display: none; margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #eee; }
+        .control-panel.active { display: block; }
+        
+        .location-group { display: flex; justify-content: center; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }
+        
         #message { margin-top: 1.5rem; padding: 1rem; border-radius: 4px; display: none; }
-        .success { background-color: #d4edda; color: #155724; }
-        .error { background-color: #f8d7da; color: #721c24; }
+        .success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .loading { background-color: #e2e3e5; color: #383d41; border: 1px solid #d6d8db; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Move to Rank</h1>
-        <div>
-            <input type="number" id="rankInput" min="1" max="8" value="1">
-            <button id="confirmBtn">Confirm</button>
+        <h1>Control Panel</h1>
+        
+        <div class="form-group">
+            <label for="modeSelect"><strong>Select Action:</strong></label>
+            <select id="modeSelect">
+                <option value="reset">Reset</option>
+                <option value="align">Align</option>
+                <option value="move">Move</option>
+            </select>
         </div>
+
+        <div id="resetPanel" class="control-panel active">
+            <p>Reset the system to its default state.</p>
+            <button id="resetBtn" class="action-btn" data-endpoint="/reset">Execute Reset</button>
+        </div>
+
+        <div id="alignPanel" class="control-panel">
+            <p>Align to a specific file and rank.</p>
+            <div class="location-group">
+                <label>Target:</label>
+                <select class="file-select" id="alignFile"></select>
+                <select class="rank-select" id="alignRank"></select>
+            </div>
+            <button id="alignBtn" class="action-btn" data-endpoint="/align">Execute Align</button>
+        </div>
+
+        <div id="movePanel" class="control-panel">
+            <p>Move from a starting location to an ending location.</p>
+            <div class="location-group">
+                <label>Start:</label>
+                <select class="file-select" id="moveStartFile"></select>
+                <select class="rank-select" id="moveStartRank"></select>
+            </div>
+            <div class="location-group">
+                <label>End:</label>
+                <select class="file-select" id="moveEndFile"></select>
+                <select class="rank-select" id="moveEndRank"></select>
+            </div>
+            <button id="moveBtn" class="action-btn" data-endpoint="/move">Execute Move</button>
+        </div>
+
         <div id="message"></div>
     </div>
 
     <script>
-        const btn = document.getElementById('confirmBtn');
-        const input = document.getElementById('rankInput');
+        // --- Setup UI Elements ---
+        const modeSelect = document.getElementById('modeSelect');
+        const panels = {
+            reset: document.getElementById('resetPanel'),
+            align: document.getElementById('alignPanel'),
+            move: document.getElementById('movePanel')
+        };
         const msgDiv = document.getElementById('message');
+        const allButtons = document.querySelectorAll('.action-btn');
 
-        btn.addEventListener('click', async () => {
-            const rank = input.value;
-            if (rank < 1 || rank > 8) {
-                showMessage('Please enter a rank between 1 and 8.', 'error');
-                return;
-            }
+        // Populate File (A-H) and Rank (1-8) dropdowns dynamically to keep HTML clean
+        const files = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+        const ranks = ['1', '2', '3', '4', '5', '6', '7', '8'];
 
+        document.querySelectorAll('.file-select').forEach(select => {
+            files.forEach(file => select.add(new Option(file, file)));
+        });
+        document.querySelectorAll('.rank-select').forEach(select => {
+            ranks.forEach(rank => select.add(new Option(rank, rank)));
+        });
+
+        // --- Handle Mode Switching ---
+        modeSelect.addEventListener('change', (e) => {
+            // Hide all panels
+            Object.values(panels).forEach(panel => panel.classList.remove('active'));
+            // Show selected panel
+            panels[e.target.value].classList.add('active');
+            // Hide message on mode switch
+            msgDiv.style.display = 'none';
+        });
+
+        // --- Shared Fetch Logic ---
+        async function sendCommand(button, payload) {
+            const endpoint = button.getAttribute('data-endpoint');
+            
             // UI State: Loading
-            btn.disabled = true;
-            showMessage('Sending command...', '');
-            msgDiv.style.display = 'block';
+            allButtons.forEach(btn => btn.disabled = true);
+            showMessage('Sending command...', 'loading');
 
             try {
-                const response = await fetch(`/move/${rank}`, { method: 'POST' });
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
                 const data = await response.json();
 
-                if (data.status === 'success') {
-                    showMessage(data.message, 'success');
+                if (response.ok && data.status === 'success') {
+                    showMessage(data.message || 'Command executed successfully.', 'success');
                 } else {
-                    showMessage(data.message || 'An error occurred', 'error');
+                    showMessage(data.message || 'An error occurred on the server.', 'error');
                 }
             } catch (err) {
                 showMessage('Failed to connect to server.', 'error');
             } finally {
-                btn.disabled = false;
+                // UI State: Restore
+                allButtons.forEach(btn => btn.disabled = false);
             }
-        });
+        }
 
         function showMessage(text, type) {
             msgDiv.textContent = text;
             msgDiv.className = type;
             msgDiv.style.display = 'block';
         }
+
+        // --- Event Listeners for Buttons ---
+        document.getElementById('resetBtn').addEventListener('click', function() {
+            sendCommand(this, { command: 'reset' });
+        });
+
+        document.getElementById('alignBtn').addEventListener('click', function() {
+            const payload = {
+                file: document.getElementById('alignFile').value,
+                rank: document.getElementById('alignRank').value
+            };
+            sendCommand(this, payload);
+        });
+
+        document.getElementById('moveBtn').addEventListener('click', function() {
+            const payload = {
+                start_file: document.getElementById('moveStartFile').value,
+                start_rank: document.getElementById('moveStartRank').value,
+                end_file: document.getElementById('moveEndFile').value,
+                end_rank: document.getElementById('moveEndRank').value
+            };
+            sendCommand(this, payload);
+        });
     </script>
 </body>
 </html>
