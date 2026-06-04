@@ -232,7 +232,7 @@ class ArucoMarker:
             num_points = self.points_array.shape[0]
             min_number_of_points_for_plane_fitting = 16
             if num_points < min_number_of_points_for_plane_fitting:
-                print('WARNING: There are too few points from the depth image for plane fitting, so only using the RGB ArUco estimate. number of points =', num_points)
+                # print('WARNING: There are too few points from the depth image for plane fitting, so only using the RGB ArUco estimate. number of points =', num_points)
                 only_use_rgb = True
         else:
             only_use_rgb = True
