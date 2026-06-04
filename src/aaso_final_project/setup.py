@@ -16,7 +16,7 @@ setup(
         # Include the config folder
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml')), 
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'interfaces'],
     zip_safe=True,
     maintainer='Owen Boseley',
     maintainer_email='nulltm01@gmail.com',
