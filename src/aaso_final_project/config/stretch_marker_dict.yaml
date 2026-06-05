@@ -162,97 +162,177 @@
         name: 'WhitePawn8'
         link: 'None'
       '33':
-        length_mm: 27
+        length_mm: 18
         use_rgb_only: False
-        name: 'FileA'
+        name: 'FileAW'
         link: 'None'
       '34':
-        length_mm: 27
+        length_mm: 18
         use_rgb_only: False
-        name: 'FileB'
+        name: 'FileBW'
         link: 'None'
       '35':
-        length_mm: 27
+        length_mm: 18
         use_rgb_only: False
-        name: 'FileC'
+        name: 'FileCW'
         link: 'None'
       '36':
-        length_mm: 27
+        length_mm: 18
         use_rgb_only: False
-        name: 'FileD'
+        name: 'FileDW'
         link: 'None'
       '37':
-        length_mm: 27
+        length_mm: 18
         use_rgb_only: False
-        name: 'FileE'
+        name: 'FileEW'
         link: 'None'
       '38':
-        length_mm: 27
+        length_mm: 18
         use_rgb_only: False
-        name: 'FileF'
+        name: 'FileFW'
         link: 'None'
       '39':
-        length_mm: 27
+        length_mm: 18
         use_rgb_only: False
-        name: 'FileG'
+        name: 'FileGW'
         link: 'None'
       '40':
-        length_mm: 27
+        length_mm: 18
         use_rgb_only: False
-        name: 'FileH'
+        name: 'FileHW'
         link: 'None'
       '41':
-        length_mm: 27
+        length_mm: 18
         use_rgb_only: False
-        name: 'Rank1'
+        name: 'Rank1W'
         link: 'None'
       '42':
-        length_mm: 27
+        length_mm: 18
         use_rgb_only: False
-        name: 'Rank2'
+        name: 'Rank2W'
         link: 'None'
       '43':
-        length_mm: 27
+        length_mm: 18
         use_rgb_only: False
-        name: 'Rank3'
+        name: 'Rank3W'
         link: 'None'
       '44':
-        length_mm: 27
+        length_mm: 18
         use_rgb_only: False
-        name: 'Rank4'
+        name: 'Rank4W'
         link: 'None'
       '45':
-        length_mm: 27
+        length_mm: 18
         use_rgb_only: False
-        name: 'Rank5'
+        name: 'Rank5W'
         link: 'None'
       '46':
-        length_mm: 27
+        length_mm: 18
         use_rgb_only: False
-        name: 'Rank6'
+        name: 'Rank6W'
         link: 'None'
       '47':
-        length_mm: 27
+        length_mm: 18
         use_rgb_only: False
-        name: 'Rank7'
+        name: 'Rank7W'
         link: 'None'
       '48':
-        length_mm: 27
+        length_mm: 18
         use_rgb_only: False
-        name: 'Rank8'
+        name: 'FileAB'
         link: 'None'
       '49':
-        length_mm: 25
+        length_mm: 18
+        use_rgb_only: False
+        name: 'FileBB'
+        link: 'None'
+      '50':
+        length_mm: 18
+        use_rgb_only: False
+        name: 'FileCB'
+        link: 'None'
+      '51':
+        length_mm: 18
+        use_rgb_only: False
+        name: 'FileDB'
+        link: 'None'
+      '52':
+        length_mm: 18
+        use_rgb_only: False
+        name: 'FileEB'
+        link: 'None'
+      '53':
+        length_mm: 18
+        use_rgb_only: False
+        name: 'FileFB'
+        link: 'None'
+      '54':
+        length_mm: 18
+        use_rgb_only: False
+        name: 'FileGB'
+        link: 'None'
+      '55':
+        length_mm: 18
+        use_rgb_only: False
+        name: 'FileHB'
+        link: 'None'
+      '56':
+        length_mm: 18
         use_rgb_only: False
         name: 'WhitePromo'
         link: 'None'
-      '50':
-        length_mm: 25
+      '57':
+        length_mm: 18
         use_rgb_only: False
         name: 'BlackPromo'
         link: 'None'
+      '58':
+        length_mm: 18
+        use_rgb_only: False
+        name: 'Rank1B'
+        link: 'None'
+      '59':
+        length_mm: 18
+        use_rgb_only: False
+        name: 'Rank2B'
+        link: 'None'
+      '60':
+        length_mm: 18
+        use_rgb_only: False
+        name: 'Rank3B'
+        link: 'None'
+      '61':
+        length_mm: 18
+        use_rgb_only: False
+        name: 'Rank4B'
+        link: 'None'
+      '62':
+        length_mm: 18
+        use_rgb_only: False
+        name: 'Rank5B'
+        link: 'None'
+      '63':
+        length_mm: 18
+        use_rgb_only: False
+        name: 'Rank6B'
+        link: 'None'
+      '64':
+        length_mm: 18
+        use_rgb_only: False
+        name: 'Rank7B'
+        link: 'None'
+      '200':
+        length_mm: 14.0
+        use_rgb_only: true
+        name: 'finger_left'
+        link: 'link_finger_left'
+      '201':
+        length_mm: 14.0
+        use_rgb_only: true
+        name: 'finger_right'
+        link: 'link_finger_right'
       'default':
-        length_mm: 24
+        length_mm: 18
         use_rgb_only: False
         name: 'unknown'
         link: 'None'

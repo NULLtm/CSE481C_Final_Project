@@ -23,7 +23,7 @@ LAUNCH CHESS DRIVER:
 ros2 launch aaso_final_project chess_driver.launch.py
 
 LAUNCH WEB INTERFACE:
-cd ~/aaso/src/front-back-connection-test1
+cd ~/aaso_ws/src/front-back-connection-test1
 python3 app.py
 
 Go to the website provided and enjoy.
