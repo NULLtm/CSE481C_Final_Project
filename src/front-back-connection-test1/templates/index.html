@@ -37,6 +37,7 @@
                 <option value="reset">Reset</option>
                 <option value="align">Align</option>
                 <option value="move">Move</option>
+                <option value="take">Take</option>
             </select>
         </div>
 
@@ -71,16 +72,16 @@
         </div>
 
         <div id="takePanel" class="control-panel">
-            <p>Move from a starting location to an ending location.</p>
+            <p>Take from a starting location to an ending location.</p>
             <div class="location-group">
                 <label>Start:</label>
-                <select class="file-select" id="moveStartFile"></select>
-                <select class="rank-select" id="moveStartRank"></select>
+                <select class="file-select" id="takeStartFile"></select>
+                <select class="rank-select" id="takeStartRank"></select>
             </div>
             <div class="location-group">
                 <label>End:</label>
-                <select class="file-select" id="moveEndFile"></select>
-                <select class="rank-select" id="moveEndRank"></select>
+                <select class="file-select" id="takeEndFile"></select>
+                <select class="rank-select" id="takeEndRank"></select>
             </div>
             <button id="takeBtn" class="action-btn" data-endpoint="/take">Execute Take</button>
         </div>

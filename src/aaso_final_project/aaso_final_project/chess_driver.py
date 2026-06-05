@@ -111,33 +111,64 @@ class ChessDriver(Node):
             response.success = False
             return response
 
-        # Step 2: Base Rotation (if you have a standard rotation to face the board)
-        # ... (paste your base rotation logic here) ...
-        # --- STEP 2: Rotate Mobile Base ---
-        # self.get_logger().info("Step 2: Rotating base to face marker...")
-        # t = self.get_marker_transform(request.pos)
-        # if t is None:
-        #     response.message = f"Could not find marker '{request.pos}' for rotation."
-        #     return response
+        # --- STEP 2: Rotate Mobile Base Flush with Table ---
+        self.get_logger().info("Step 2: Scanning for any visible rank marker (1-8)...")
+        
+        t = None
+        found_marker_id = None
 
-        # # Calculate the angle to the marker using atan2(y, x)
-        # dx = t.transform.translation.x
-        # dy = t.transform.translation.y
-        # angle_to_marker = math.atan2(dy, dx)
+        # Loop through ranks 1 to 8 to find the first visible marker
+        for rank in range(8, 0, -1):
+            # Adjust the naming format below to match your setup 
+            # (e.g., if your tf frames are strings like "rank_1" or integers like 1)
+            target_marker = f"Rank{rank}" 
+            
+            t = self.get_marker_transform(target_marker, "base_link")
+            if t is not None:
+                found_marker_id = target_marker
+                self.get_logger().info(f"Found marker '{found_marker_id}'. Using it for alignment.")
+                break
 
-        # # In Stretch, the mobile base tracks relative movements via joint_states
-        # current_rot = self.current_joint_states.get('rotate_mobile_base', 0.0)
-        # target_rot = current_rot + angle_to_marker
+        # If the loop finished and t is still None, we didn't see anything
+        if t is None:
+            response.message = "Could not find any rank markers [1-8] in sight to orient against."
+            response.success = False
+            return response
+        
 
-        # success = self.execute_trajectory(
-        #     ['rotate_mobile_base'],
-        #     [target_rot],
-        #     duration_sec=3.0
-        # )
-        # if not success:
-        #     response.message = "Failed during base rotation."
-        #     return response
+        for atempt in range(2):            
+            t = self.get_marker_transform(found_marker_id, "base_link")
 
+            # 1. Extract the quaternion rotation from the transform
+            qx = t.transform.rotation.x
+            qy = t.transform.rotation.y
+            qz = t.transform.rotation.z
+            qw = t.transform.rotation.w
+
+            # 2. Convert Quaternion to Yaw (Rotation around Z-axis)
+            siny_cosp = 2.0 * (qw * qz + qx * qy)
+            cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
+            marker_yaw = math.atan2(siny_cosp, cosy_cosp)
+
+            # 3. Calculate the alignment angle
+            # Depending on how your marker is physically stuck to the board/table, 
+            # you may need an offset. If the marker faces the robot directly when flush,
+            # the error is often just the marker_yaw, or marker_yaw ± math.pi
+            alignment_error = marker_yaw 
+
+            # 4. Get current mobile base joint position and calculate target
+            current_rot = self.current_joint_states.get('rotate_mobile_base', 0.0)
+            target_rot = current_rot + alignment_error
+
+            # 5. Execute movement (Ensure targets are floats!)
+            success = self.execute_trajectory(
+                ['rotate_mobile_base'],
+                [float(target_rot + math.pi / 2)],
+                duration_sec=4.0
+            )
+            if not success:
+                response.message = "Failed during base alignment rotation."
+                return response
 
         response.message = "Reset complete."
         response.success = True
@@ -233,15 +264,13 @@ class ChessDriver(Node):
         return response
     
     def take_callback(self, request, response):
+
+        self.get_logger().info('Request received for a take...')
         if self.move_to_square(request.end_file, request.end_rank, response=response) is False:
             return response
 
         # grab
         if self.grab(response) is False:
-            return response        
-
-        # move close to discard zone
-        if self.move_to_square("H", "5", response=response) is False:
             return response
         
         if self.gripper_discard_position(response=response) is False:
@@ -271,7 +300,7 @@ class ChessDriver(Node):
         self.get_logger().info("Discard positioning gripper...")
         success = self.execute_trajectory(
             ['wrist_extension', 'joint_wrist_yaw', 'joint_wrist_pitch'],
-            [0.5, 0, 0],
+            [0.5, 0.0, 0.0],
             duration_sec=6.0
         )
         if not success:
