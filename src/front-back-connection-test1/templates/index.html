@@ -70,6 +70,21 @@
             <button id="moveBtn" class="action-btn" data-endpoint="/move">Execute Move</button>
         </div>
 
+        <div id="takePanel" class="control-panel">
+            <p>Move from a starting location to an ending location.</p>
+            <div class="location-group">
+                <label>Start:</label>
+                <select class="file-select" id="moveStartFile"></select>
+                <select class="rank-select" id="moveStartRank"></select>
+            </div>
+            <div class="location-group">
+                <label>End:</label>
+                <select class="file-select" id="moveEndFile"></select>
+                <select class="rank-select" id="moveEndRank"></select>
+            </div>
+            <button id="takeBtn" class="action-btn" data-endpoint="/take">Execute Take</button>
+        </div>
+
         <div id="message"></div>
     </div>
 
@@ -79,7 +94,8 @@
         const panels = {
             reset: document.getElementById('resetPanel'),
             align: document.getElementById('alignPanel'),
-            move: document.getElementById('movePanel')
+            move: document.getElementById('movePanel'),
+            take: document.getElementById('takePanel')
         };
         const msgDiv = document.getElementById('message');
         const allButtons = document.querySelectorAll('.action-btn');
@@ -160,6 +176,16 @@
                 start_rank: document.getElementById('moveStartRank').value,
                 end_file: document.getElementById('moveEndFile').value,
                 end_rank: document.getElementById('moveEndRank').value
+            };
+            sendCommand(this, payload);
+        });
+
+        document.getElementById('takeBtn').addEventListener('click', function() {
+            const payload = {
+                start_file: document.getElementById('takeStartFile').value,
+                start_rank: document.getElementById('takeStartRank').value,
+                end_file: document.getElementById('takeEndFile').value,
+                end_rank: document.getElementById('takeEndRank').value
             };
             sendCommand(this, payload);
         });

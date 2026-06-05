@@ -20,11 +20,14 @@ class RobotClient(Node):
         self.align_client = self.create_client(Align, '/chess/align')
         # 3. Setup Move Client
         self.move_client = self.create_client(Move, '/chess/move')
+        # 3. Setup Take Client
+        self.take_client = self.create_client(Move, '/chess/take')
 
         self.get_logger().info('Waiting for ROS 2 services to become available...')
         self.reset_client.wait_for_service()
         self.align_client.wait_for_service()
         self.move_client.wait_for_service()
+        self.take_client.wait_for_service()
         self.get_logger().info('All chess services are ready!')
 
 robot_node = None
@@ -120,6 +123,39 @@ def move_robot():
     try:
         response = future.result()
         return jsonify({"status": "success", "message": f"Moved from {start_file}{start_rank} to {end_file}{end_rank}."})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+    
+@app.route('/take', methods=['POST'])
+def take_robot():
+    global robot_node
+    if robot_node is None or not robot_node.take_client.service_is_ready():
+        return jsonify({"status": "error", "message": "ROS 2 node or service not ready"}), 500
+
+    # Extract JSON payload from frontend
+    data = request.get_json()
+    start_file = data.get('start_file')
+    start_rank = data.get('start_rank')
+    end_file = data.get('end_file')
+    end_rank = data.get('end_rank')
+
+    req = Move.Request()
+    # TODO: Map start/end files and ranks to your Request object
+    # e.g., req.start_pos = f"{start_file}{start_rank}"
+
+    req.start_file = start_file
+    req.end_file = end_file
+    req.start_rank = start_rank
+    req.end_rank = end_rank
+    
+    future = robot_node.take_client.call_async(req)
+    
+    while not future.done():
+        time.sleep(0.1)
+    
+    try:
+        response = future.result()
+        return jsonify({"status": "success", "message": f"Took from {start_file}{start_rank} to {end_file}{end_rank}."})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 

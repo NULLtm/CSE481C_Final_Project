@@ -247,9 +247,11 @@ class ChessDriver(Node):
         if self.gripper_discard_position(response=response) is False:
             return response
         
-        # drop
-        if self.drop(response):
-            response.message = f"Successfully moved piece."
+        if self.open_gripper(response) is False:
+            return response
+        
+        if self.gripper_reset_position(response):
+            response.message = f"Successfully took piece."
         return response
 
     def open_gripper(self, response):
@@ -274,6 +276,19 @@ class ChessDriver(Node):
         )
         if not success:
             response.message = "Gripper failed to go into discard position."
+            response.success = False
+        return success
+    
+    def gripper_reset_position(self, response):
+        self.get_logger().info("Reset positioning gripper...")
+        
+        success = self.execute_trajectory(
+            ['joint_lift', 'wrist_extension', 'joint_wrist_yaw', 'joint_wrist_pitch', 'joint_gripper_finger_left'],
+            [1.1, 0.0, 3.14, -1.57, 0.13],
+            duration_sec=6.0
+        )
+        if not success:
+            response.message = "Gripper failed to go into reset position."
             response.success = False
         return success
     
