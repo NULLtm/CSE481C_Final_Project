@@ -593,6 +593,11 @@
       <div id="boardOverlay" class="board-overlay">Robot is moving...</div>
     </div>
 
+    <div id="robotBusyOverlay" style="display:none">
+      <div class="spinner"></div>
+      <p>Robot is moving…</p>
+    </div>
+
     <div class="select-hint" id="selectHint">Tap or drag a piece to select it.</div>
 
     <div class="voice-panel" id="voicePanel" hidden>
@@ -601,7 +606,7 @@
       </button>
       <span class="mic-label" id="micLabel">TAP TO SPEAK</span>
       <div class="transcript-box" id="transcriptBox">
-        <span class="hint-text">Say a move like &ldquo;e2 to e4&rdquo; or &ldquo;knight to f3&rdquo;</span>
+        <span class="hint-text">Say &ldquo;Robochess move e2 to e4&rdquo;</span>
       </div>
     </div>
 
@@ -624,6 +629,20 @@
     <div id="moveLog"></div>
   </div>
 
+</div>
+
+<!-- Promotion picker modal -->
+<div id="promoModal" style="display:none">
+  <div id="promoBackdrop"></div>
+  <div id="promoDialog">
+    <p>Promote pawn to…</p>
+    <div id="promoChoices">
+      <button class="promo-btn" data-piece="q">♛ Queen</button>
+      <button class="promo-btn" data-piece="r">♜ Rook</button>
+      <button class="promo-btn" data-piece="b">♝ Bishop</button>
+      <button class="promo-btn" data-piece="n">♞ Knight</button>
+    </div>
+  </div>
 </div>
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js" crossorigin="anonymous"></script>
@@ -781,7 +800,7 @@
   // =========================================================================
   const SUBTITLES = {
     select: 'Tap or drag a piece to move.',
-    voice:  'Use voice commands to make your move.',
+    voice:  'Say "Robochess move [from] [to]" — e.g. "Robochess move e2 to e4".',
   };
 
   function switchMode(mode) {
@@ -793,15 +812,15 @@
     if (mode === 'voice') {
       $('#voicePanel').show();
       $('#selectHint').hide();
+      startListening();   // begin always-on listening immediately
     } else {
       $('#voicePanel').hide();
       $('#selectHint').show();
+      stopListening();    // stop listening when leaving voice mode
     }
 
     $('#modeSubtitle').text(SUBTITLES[mode]);
-
     clearSelection();
-    stopListening();
   }
 
   $('.mode-btn').on('click', function () {
@@ -879,39 +898,62 @@
     recognizer = new SpeechRecognition();
     recognizer.lang        = 'en-US';
     recognizer.interimResults = true;
-    recognizer.continuous  = false;
+    recognizer.continuous  = true;
     recognizer.maxAlternatives = 3;
 
     recognizer.addEventListener('result', (evt) => {
-      const results = evt.results[evt.results.length - 1];
-      const interim = results[0].transcript;
+      // In continuous mode, resultIndex points to the newest result only.
+      const result  = evt.results[evt.resultIndex];
+      const interim = result[0].transcript;
 
-      if (!results.isFinal) {
+      // Show interim (in-progress) transcript while the user is still speaking.
+      if (!result.isFinal) {
         setVoiceResult(`"${interim}"`, 'heard');
         return;
       }
 
-      let parsed = null;
-      for (let i = 0; i < results.length; i++) {
-        parsed = parseVoiceMove(results[i].transcript);
-        if (parsed) break;
+      // Final result — scan all alternatives for the wake phrase.
+      // Accepted forms: "Robochess move …", "Robo chess move …", "Robot chess move …"
+      const WAKE_RE = /rob(?:o\s*|ot\s*)chess\s+move\s+(.*)/i;
+      let commandText = null;
+      for (let i = 0; i < result.length; i++) {
+        const m = result[i].transcript.match(WAKE_RE);
+        if (m) { commandText = m[1].trim(); break; }
       }
 
+      if (!commandText) {
+        // Wake phrase not heard — keep listening silently.
+        setVoiceResult('<span class="hint-text">Listening… say &ldquo;Robochess move e2 to e4&rdquo;</span>');
+        return;
+      }
+
+      // Wake phrase detected — try to parse the move that followed it.
+      const parsed = parseVoiceMove(commandText);
       if (parsed) {
-        setVoiceResult(`Heard: "${interim}" → ${parsed.from.toUpperCase()}${parsed.to.toUpperCase()}`, 'parsed');
+        setVoiceResult(
+          `<span class="parsed-move">Moving: ${parsed.from.toUpperCase()} → ${parsed.to.toUpperCase()}</span>`
+        );
         if (isPromotion(parsed.from, parsed.to)) {
           requestPromotion(parsed.from, parsed.to);
         } else {
           sendMove(parsed.from, parsed.to);
         }
       } else {
-        setVoiceResult(`Couldn't parse "${interim}". Try "e2 to e4".`, 'error');
+        setVoiceResult(
+          `<span class="error-text">Heard wake phrase but couldn't parse move: "${escHtml(commandText)}"</span>`
+        );
       }
     });
 
     recognizer.addEventListener('end', () => {
-      listening = false;
-      updateMicUI();
+      // In continuous mode the browser can stop recognition after a long silence
+      // or a network hiccup.  Restart automatically as long as we're supposed to
+      // be listening so the user never has to tap the button again.
+      if (listening) {
+        try { recognizer.start(); } catch (_) { /* already starting */ }
+      } else {
+        updateMicUI();
+      }
     });
 
     recognizer.addEventListener('error', (evt) => {
@@ -966,9 +1008,9 @@
     $btn.removeClass('listening processing');
     if (listening) {
       $btn.addClass('listening');
-      $lbl.text('TAP TO STOP');
+      $lbl.text('ALWAYS LISTENING — TAP TO STOP');
     } else {
-      $lbl.text('TAP TO SPEAK');
+      $lbl.text('TAP TO START LISTENING');
     }
   }
 
@@ -980,6 +1022,41 @@
     else if (type === 'error')  html = `<span class="error-text">${escHtml(text)}</span>`;
     else                        html = text;
     $('#transcriptBox').html(html);
+  }
+
+  // Maps spoken piece names (including common mishearings) to chess.js letters.
+  const PIECE_WORDS = {
+    'king': 'k', 'queen': 'q', 'rook': 'r',
+    'bishop': 'b', 'knight': 'n', 'night': 'n', 'pawn': 'p',
+  };
+
+  // Resolve a SAN string like 'O-O' into a {from, to} pair using the live board.
+  function resolveSAN(san) {
+    const moves = chess.moves({ verbose: true });
+    const m = moves.find(mv => mv.san === san || mv.san.replace(/[+#]/g, '') === san);
+    return m ? { from: m.from, to: m.to } : null;
+  }
+
+  // Find which legal move involves pieceLetter landing on dest.
+  function resolveByPiece(pieceLetter, dest) {
+    const moves = chess.moves({ verbose: true });
+    const m = moves.find(mv => mv.piece === pieceLetter && mv.to === dest);
+    return m ? { from: m.from, to: m.to } : null;
+  }
+
+  // True if any legal move from→to is a pawn promotion.
+  function isPromotion(from, to) {
+    return chess.moves({ verbose: true })
+      .some(m => m.from === from && m.to === to && m.promotion);
+  }
+
+  // Show the promotion-piece picker dialog then send the move.
+  function requestPromotion(from, to) {
+    $('#promoModal').show();
+    $('#promoChoices .promo-btn').off('click').on('click', function () {
+      $('#promoModal').hide();
+      sendMove(from, to, $(this).data('piece'));
+    });
   }
 
   function parseVoiceMove(text) {
