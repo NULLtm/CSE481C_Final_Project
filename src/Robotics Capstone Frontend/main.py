@@ -298,9 +298,17 @@ async def websocket_endpoint(ws: WebSocket):
             move = game.apply_move(uci)
 
             if move is not None:
+                # robot_executing is True when the robot will physically carry out
+                # this move — the client uses this to keep the board locked until
+                # robot_idle arrives.
+                robot_executing = robot_move and not robot.is_busy
+
                 # Broadcast the updated board to all clients immediately;
                 # the robot move runs concurrently and never delays the UI.
-                await manager.broadcast({"fen": game.fen, "event": "move", "uci": uci})
+                await manager.broadcast({
+                    "fen": game.fen, "event": "move", "uci": uci,
+                    "robot_executing": robot_executing,
+                })
 
                 # Detect and broadcast game-over conditions.
                 reason: str | None = None
