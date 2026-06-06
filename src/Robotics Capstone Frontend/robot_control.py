@@ -33,7 +33,7 @@ BOARD_STATE_TOPIC = "/chess/board_state"   # std_msgs/String (JSON from aruco no
 
 SERVICE_MOVE      = "/chess/move"          # interfaces/srv/Move
 SERVICE_TAKE      = "/chess/take"          # interfaces/srv/Move (same type)
-SERVICE_TYPE_MOVE = "interfaces/srv/Move"
+SERVICE_TYPE_MOVE = "interfaces/Move"
 
 # Seconds to wait for a service response — robot moves are slow.
 SERVICE_TIMEOUT = 120.0
