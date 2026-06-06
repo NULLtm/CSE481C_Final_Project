@@ -11,6 +11,9 @@ set(srv_files
   "srv/AlgNotation.srv"
   "srv/Align.srv"
   "srv/Move.srv"
+  "srv/Promote.srv"
+  "srv/Castle.srv"
+  "srv/EnPassant.srv"
 )
 
 rosidl_generate_interfaces(${PROJECT_NAME}

@@ -1,0 +1,13 @@
+# Request (Client -> Server)
+string start_rank_w
+string start_file_w
+string end_rank_w
+string end_file_w
+string rank_l
+string file_l
+string win_pawn
+string lose_pawn
+---
+# Response (Server -> Client)
+string message
+bool success

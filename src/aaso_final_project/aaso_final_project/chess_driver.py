@@ -26,19 +26,30 @@ from tf2_ros.transform_listener import TransformListener
 # Your custom service
 from interfaces.srv import Move
 from interfaces.srv import Align
+from interfaces.srv import Promote
+from interfaces.srv import Castle
+from interfaces.srv import EnPassant
 from std_srvs.srv import Trigger
 
 
 class ChessDriver(Node):
 
+    # TODO add castling, promotion, and en passant
+    # TODO Make lift grab height use aruco markers?
+    # TODO Look for speed ups?
+    # TODO Make a system for the robot backing up from the table if needed
+    # TODO If the robot cannot see any ranks for rank adjustment then backup?
+    # TODO For file/rank adjustment use other rank / file markers with an offset?
+    # TODO Bug with Arda's frontend? -- if you click a piece to a non-valid square it moves the piece indicator making the actual move using piece=unknown
+
     # Constants -- to be tuned depending
 
-    GRIPPER_OPEN = 0.11
+    GRIPPER_OPEN = 0.12
     GRIPPER_CLOSED = -0.05
 
     LIFT_TOP = 1.1
     LIFT_PICKUP_HEIGHT = 0.97
-    LIFT_DROP_HEIGHT = 0.96
+    LIFT_DROP_HEIGHT = 0.965
     LIFT_ADJUST_HEIGHT = 1.03
 
     WRIST_YAW_DISCARD = 0.0
@@ -47,7 +58,7 @@ class ChessDriver(Node):
     WRIST_PITCH_DISCARD = 0.0
     WRIST_PITCH_NORMAL = -math.pi / 2
 
-    WRIST_EXTENSION_DISCARD = 0.4
+    WRIST_EXTENSION_DISCARD = 0.42
     WRIST_EXTENSION_RESET = 0.0
 
     WRIST_RETRACTION_ERROR = 0.04
@@ -120,6 +131,24 @@ class ChessDriver(Node):
             Trigger,
             '/chess/reset',
             self.reset_callback
+        )
+
+        self.promote_service = self.create_service(
+            Promote,
+            '/chess/promote',
+            self.promote_callback
+        )
+
+        self.castle_service = self.create_service(
+            Castle,
+            '/chess/castle',
+            self.castle_callback
+        )
+
+        self.enpassant_service = self.create_service(
+            EnPassant,
+            '/chess/enpassant',
+            self.enpassant_callback
         )
 
         self.previousRank = None
@@ -248,6 +277,48 @@ class ChessDriver(Node):
             response.success = True
         return response
     
+    def promote_callback(self, request, response):
+
+        self.get_logger().info('Promote received for a move...')
+
+        if self.remove_piece(response, request.start_file, request.start_rank, request.start_piece) is False:
+            return response
+
+        if request.end_piece == '':
+            if self.remove_piece(response, request.end_file, request.end_rank, request.end_piece) is False:
+                return response
+            
+        # TODO GO TO PROMO SQUARE AND MOVE IT TO CORRECT SQUARE
+        response.message = f"Successfully promoted piece."
+        response.success = True
+        return response
+    
+    def castle_callback(self, request, response):
+
+        self.get_logger().info('Castle received for a move...')
+
+        if self.move(response, request.start_file_k, request.start_rank_k, request.end_file_k, request.end_rank_k, request.king_piece) is False:
+            return response
+        
+        if self.move(response, request.start_file_r, request.start_rank_r, request.end_file_r, request.end_rank_r, request.rook_piece):
+            response.message = f"Successfully castled piece."
+            response.success = True
+            
+        return response
+    
+    def enpassant_callback(self, request, response):
+
+        self.get_logger().info('EnPassant received for a move...')
+
+        if self.remove_piece(response, request.file_l, request.rank_l, request.lose_pawn) is False:
+            return response
+        
+        if self.move(response, request.start_file_w, request.start_rank_w, request.end_file_w, request.end_rank_w, request.win_pawn):
+            response.message = f"Successfully EnPassant piece."
+            response.success = True
+            
+        return response
+    
     def move(self, response, start_file, start_rank, end_file, end_rank, piece):
         if self.move_to_square(start_file, start_rank, response=response) is False:
             return False
@@ -260,23 +331,27 @@ class ChessDriver(Node):
         
         return self.drop(response)
     
+    def remove_piece(self, response, file, rank, piece):
+        if self.move_to_square(file, rank, response=response) is False:
+            return False
+
+        if self.grab(response, piece) is False:
+            return False
+        
+        if self.gripper_discard_position(response=response) is False:
+            return False
+        
+        if self.open_gripper(response) is False:
+            return False
+        
+        return self.gripper_reset_position(response)
+
+    
     def take_callback(self, request, response):
 
         self.get_logger().info('Request received for a take...')
 
-        if self.move_to_square(request.end_file, request.end_rank, response=response) is False:
-            return response
-
-        if self.grab(response, request.end_piece) is False:
-            return response
-        
-        if self.gripper_discard_position(response=response) is False:
-            return response
-        
-        if self.open_gripper(response) is False:
-            return response
-        
-        if self.gripper_reset_position(response) is False:
+        if self.remove_piece(response, request.end_file, request.end_rank, request.end_piece) is False:
             return response
 
         if self.move(response, request.start_file, request.start_rank, request.end_file, request.end_rank, request.start_piece):
@@ -589,7 +664,7 @@ class ChessDriver(Node):
 
         # TODO fix the adjustments for the File
 
-        self.execute_trajectory(['wrist_extension'], [(index + 0.1) * self.ONE_RANK_DISTANCE - 0.02], duration_sec=5.0)
+        self.execute_trajectory(['wrist_extension'], [(index + 0.1) * self.ONE_RANK_DISTANCE], duration_sec=5.0)
 
         time.sleep(2)
         

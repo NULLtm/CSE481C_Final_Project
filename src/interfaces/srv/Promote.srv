@@ -1,0 +1,13 @@
+# Request (Client -> Server)
+# Should be [a-h][1-8]
+string start_rank
+string start_file
+string end_rank
+string end_file
+string start_piece   # ArUco marker name of the piece being moved, e.g. "WhitePawn3"
+string end_piece     # 'empty' if the square you promote to is not taken rn
+string promote_piece
+---
+# Response (Server -> Client)
+string message
+bool success

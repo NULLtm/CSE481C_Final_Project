@@ -1,0 +1,15 @@
+# Request (Client -> Server)
+string start_rank_k
+string start_file_k
+string end_rank_k
+string end_file_k
+string start_rank_r
+string start_file_r
+string end_rank_r
+string end_file_r
+string king_piece
+string rook_piece
+---
+# Response (Server -> Client)
+string message
+bool success
