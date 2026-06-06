@@ -41,13 +41,13 @@ class ChessDriver(Node):
     LIFT_DROP_HEIGHT = 0.96
     LIFT_ADJUST_HEIGHT = 1.03
 
-    WRIST_YAW_DISCARD = 0
+    WRIST_YAW_DISCARD = 0.0
     WRIST_YAW_NORMAL = math.pi
 
-    WRIST_PITCH_DISCARD = 0
+    WRIST_PITCH_DISCARD = 0.0
     WRIST_PITCH_NORMAL = -math.pi / 2
 
-    WRIST_EXTENSION_DISCARD = 0.45
+    WRIST_EXTENSION_DISCARD = 0.4
     WRIST_EXTENSION_RESET = 0.0
 
     WRIST_RETRACTION_ERROR = 0.04
@@ -58,7 +58,7 @@ class ChessDriver(Node):
     FILE_ADJUSTMENT_OFFSET = 0.034
 
     RANK_ERROR_ALLOWED = 0.005
-    FILE_ERROR_ALLOWED = 0.005
+    FILE_ERROR_ALLOWED = 0.01
 
     FINGER_ADJUSTMENT_OFFSET = 0.0
 
@@ -267,7 +267,7 @@ class ChessDriver(Node):
         if self.move_to_square(request.end_file, request.end_rank, response=response) is False:
             return response
 
-        if self.grab(response, request.start_piece) is False:
+        if self.grab(response, request.end_piece) is False:
             return response
         
         if self.gripper_discard_position(response=response) is False:
@@ -279,7 +279,7 @@ class ChessDriver(Node):
         if self.gripper_reset_position(response) is False:
             return response
 
-        if self.move(response, request.start_file, request.start_rank, request.end_file, request.end_rank, request.end_piece):
+        if self.move(response, request.start_file, request.start_rank, request.end_file, request.end_rank, request.start_piece):
             response.message = f"Successfully moved piece."
             response.success = True
         return response
@@ -300,7 +300,7 @@ class ChessDriver(Node):
         self.get_logger().info("Discard positioning gripper...")
         success1 = self.execute_trajectory(
             ['wrist_extension', 'joint_wrist_yaw', 'joint_wrist_pitch'],
-            [0.45, 0.0, 0.0],
+            [self.WRIST_EXTENSION_DISCARD, self.WRIST_YAW_DISCARD, self.WRIST_PITCH_DISCARD],
             duration_sec=6.0
         )
 
@@ -387,6 +387,7 @@ class ChessDriver(Node):
     
     def grab(self, response, piece):
         self.get_logger().info("Grabbing...")
+        self.get_logger().info(f"Aligning to {piece}...")
 
         if not self.open_gripper(response):
             return False
@@ -401,7 +402,7 @@ class ChessDriver(Node):
         # Using base_link as target_frame gives us the marker coordinates IN the base_link frame.
         trans_left = self.get_marker_transform('link_aruco_fingertip_left', 'base_link')
         trans_right = self.get_marker_transform('link_aruco_fingertip_right', 'base_link')
-        trans_target = self.get_marker_transform('piece', 'base_link')
+        trans_target = self.get_marker_transform(piece, 'base_link')
 
         # 2. Calculate the midpoint of the two fingertip markers (we only strictly need X for base translation)
         mid_x = (trans_left.transform.translation.x + trans_right.transform.translation.x) / 2.0
@@ -588,7 +589,7 @@ class ChessDriver(Node):
 
         # TODO fix the adjustments for the File
 
-        self.execute_trajectory(['wrist_extension'], [(index + 0.1) * self.ONE_RANK_DISTANCE], duration_sec=5.0)
+        self.execute_trajectory(['wrist_extension'], [(index + 0.1) * self.ONE_RANK_DISTANCE - 0.02], duration_sec=5.0)
 
         time.sleep(2)
         
