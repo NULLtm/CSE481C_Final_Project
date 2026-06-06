@@ -64,7 +64,7 @@
       '13':
         length_mm: 20
         use_rgb_only: False
-        name: 'BlackQueen1'
+        name: 'BlackKing1'
         link: 'None'
       '14':
         length_mm: 20
@@ -84,7 +84,7 @@
       '17':
         length_mm: 20
         use_rgb_only: False
-        name: 'BlackKing1'
+        name: 'BlackQueen1'
         link: 'None'
       '18':
         length_mm: 20

@@ -40,6 +40,21 @@ SERVICE_TIMEOUT = 120.0
 
 
 # ---------------------------------------------------------------------------
+# ArUco marker ID → piece name  (matches stretch_marker_dict.yaml, IDs 1-32)
+# ---------------------------------------------------------------------------
+MARKER_NAMES: dict[int, str] = {
+    1:  "BlackRook1",   2:  "BlackPawn1",   3:  "WhitePawn1",   4:  "WhiteRook1",
+    5:  "BlackKnight1", 6:  "BlackPawn2",   7:  "WhitePawn2",   8:  "WhiteKnight1",
+    9:  "BlackBishop1", 10: "BlackPawn3",   11: "WhitePawn3",   12: "WhiteBishop1",
+    13: "BlackQueen1",  14: "BlackPawn4",   15: "WhitePawn4",   16: "WhiteQueen1",
+    17: "BlackKing1",   18: "BlackPawn5",   19: "WhitePawn5",   20: "WhiteKing1",
+    21: "BlackBishop2", 22: "BlackPawn6",   23: "WhitePawn6",   24: "WhiteBishop2",
+    25: "BlackKnight2", 26: "BlackPawn7",   27: "WhitePawn7",   28: "WhiteKnight2",
+    29: "BlackRook2",   30: "BlackPawn8",   31: "WhiteRook2",   32: "WhitePawn8",
+}
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -61,7 +76,7 @@ class _RosBridge:
     the robot is unreachable — the rest of the game logic still runs.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, host, port) -> None:
         try:
             import roslibpy
             self._rp = roslibpy
@@ -74,15 +89,15 @@ class _RosBridge:
             self._ros = None
             return
 
-        self._ros = self._rp.Ros(host=ROSBRIDGE_HOST, port=ROSBRIDGE_PORT)
-        log.info("RosBridge: connecting to ws://%s:%d …", ROSBRIDGE_HOST, ROSBRIDGE_PORT)
+        self._ros = self._rp.Ros(host=host, port=port)
+        log.info("RosBridge: connecting to ws://%s:%d …", host, port)
 
         # run() starts the event loop AND blocks until connected (or times out).
         # We call it in a daemon thread so FastAPI startup is never blocked.
         def _connect():
             try:
                 self._ros.run(timeout=10.0)
-                log.info("RosBridge: connected to ws://%s:%d", ROSBRIDGE_HOST, ROSBRIDGE_PORT)
+                log.info("RosBridge: connected to ws://%s:%d", host, port)
             except Exception as exc:
                 log.warning("RosBridge: could not connect (%s) — robot moves disabled.", exc)
 
@@ -166,11 +181,12 @@ class RobotController:
     decides which services to call and in what order.
     """
 
-    def __init__(self) -> None:
-        self._bridge = _RosBridge()
+    def __init__(self, host, port) -> None:
+        self._bridge = _RosBridge(host, port)
         self._busy   = False
         self._latest_board_state: dict[int, str] = {}
         self._bridge.subscribe_board_state(self._on_board_state)
+
 
     # ------------------------------------------------------------------
     # Public API
@@ -196,6 +212,17 @@ class RobotController:
     def _on_board_state(self, pieces: dict[int, str]) -> None:
         self._latest_board_state = pieces
 
+    def _piece_name_at(self, square: str) -> str:
+        """
+        Return the ArUco marker name of the piece currently at `square`,
+        e.g. 'WhitePawn3'.  Falls back to 'unknown' if the camera hasn't
+        seen a piece there or the board state hasn't been received yet.
+        """
+        for marker_id, sq in self._latest_board_state.items():
+            if sq == square:
+                return MARKER_NAMES.get(marker_id, "unknown")
+        return "unknown"
+
     async def execute_move(
         self,
         from_square: str,
@@ -204,33 +231,39 @@ class RobotController:
         castling_rook: tuple[str, str] | None = None,
         ep_capture_sq: str | None = None,
         promo_marker_id: int | None = None,
+        piece_name: str = "",
+        captured_piece_name: str = "",
     ) -> None:
         """
         Orchestrate the physical move sequence without blocking the asyncio
         event loop.  A concurrent call while busy is silently dropped.
 
         Args:
-            from_square:   UCI origin square  (e.g. 'e2').
-            to_square:     UCI destination square (e.g. 'e4').
-            is_capture:    True for captures and en passant.
-            castling_rook: (rook_from, rook_to) for castling, else None.
-            ep_capture_sq: Square of the pawn removed by en passant, else None.
-            promo_marker_id: Ignored — chess_driver handles promotions as a
-                             regular move; piece swap is done manually.
+            from_square:          UCI origin square  (e.g. 'e2').
+            to_square:            UCI destination square (e.g. 'e4').
+            is_capture:           True for captures and en passant.
+            castling_rook:        (rook_from, rook_to) for castling, else None.
+            ep_capture_sq:        Square of the pawn removed by en passant, else None.
+            promo_marker_id:      Ignored — chess_driver handles promotions as a
+                                  regular move; piece swap is done manually.
+            piece_name:           Full ArUco marker name of the moving piece from the
+                                  UI identity tracker (e.g. 'WhitePawn3').
+            captured_piece_name:  Full ArUco marker name of the captured piece from the
+                                  UI identity tracker (e.g. 'BlackPawn5').
         """
         if self._busy:
             log.warning("Robot busy — dropping move %s → %s", from_square, to_square)
             return
         self._busy = True
         log.info(
-            "Robot executing: %s → %s  (capture=%s castle=%s ep=%s)",
-            from_square, to_square, is_capture, castling_rook, ep_capture_sq,
+            "Robot executing: %s → %s  (capture=%s castle=%s ep=%s piece=%s captured=%s)",
+            from_square, to_square, is_capture, castling_rook, ep_capture_sq, piece_name, captured_piece_name,
         )
         try:
             await asyncio.to_thread(
                 self._execute_sync,
                 from_square, to_square, is_capture,
-                castling_rook, ep_capture_sq,
+                castling_rook, ep_capture_sq, piece_name, captured_piece_name,
             )
         except Exception:
             log.exception("Unhandled error during move %s → %s", from_square, to_square)
@@ -249,17 +282,26 @@ class RobotController:
         is_capture: bool,
         castling_rook: tuple[str, str] | None,
         ep_capture_sq: str | None,
+        piece_name: str = "",
+        captured_piece_name: str = "",
     ) -> None:
-        # 1. Remove the captured piece before moving the capturing piece.
-        #    For en passant the captured pawn is on a different square.
         if is_capture:
-            capture_sq = ep_capture_sq if ep_capture_sq else to_square
-            self._take(capture_sq)
+            if ep_capture_sq:
+                # En passant: captured pawn is not at to_square — remove it first,
+                # then move the taking pawn separately.
+                if not captured_piece_name:
+                    captured_piece_name = self._piece_name_at(ep_capture_sq)
+                self._take(ep_capture_sq, ep_capture_sq, "", captured_piece_name)
+                self._move(from_square, to_square, piece_name, "unknown")
+            else:
+                # Normal capture: take_callback handles remove + move in one call.
+                if not captured_piece_name:
+                    captured_piece_name = self._piece_name_at(to_square)
+                self._take(from_square, to_square, piece_name, captured_piece_name)
+        else:
+            self._move(from_square, to_square, piece_name, "unknown")
 
-        # 2. Move the main piece from its source to its destination.
-        self._move(from_square, to_square)
-
-        # 3. For castling, also move the rook after the king is placed.
+        # For castling, also move the rook.
         if castling_rook is not None:
             rook_from, rook_to = castling_rook
             self._move(rook_from, rook_to)
@@ -268,19 +310,31 @@ class RobotController:
     # Service call helpers
     # ------------------------------------------------------------------
 
-    def _move(self, from_sq: str, to_sq: str) -> bool:
+    def _move(
+        self,
+        from_sq: str,
+        to_sq: str,
+        piece_name: str = "",
+        captured_piece: str = "unknown",
+    ) -> bool:
         """Call /chess/move to pick up the piece at from_sq and place it at to_sq."""
         from_file, from_rank = _parse_square(from_sq)
         to_file,   to_rank   = _parse_square(to_sq)
-        log.info("  [MOVE] %s → %s", from_sq.upper(), to_sq.upper())
+        start_piece = piece_name if piece_name else self._piece_name_at(from_sq)
+        log.info(
+            "  [MOVE] %s → %s  (start_piece=%s end_piece=%s)",
+            from_sq.upper(), to_sq.upper(), start_piece, captured_piece,
+        )
         response = self._bridge.call_service(
             SERVICE_MOVE,
             SERVICE_TYPE_MOVE,
             {
-                "start_file": from_file,
-                "start_rank": from_rank,
-                "end_file":   to_file,
-                "end_rank":   to_rank,
+                "start_file":  from_file,
+                "start_rank":  from_rank,
+                "end_file":    to_file,
+                "end_rank":    to_rank,
+                "start_piece": start_piece,
+                "end_piece":   captured_piece,
             },
         )
         ok = bool(response and response.get("success", False))
@@ -290,19 +344,35 @@ class RobotController:
             log.info("  [MOVE] OK — %s", response.get("message", ""))
         return ok
 
-    def _take(self, square: str) -> bool:
-        """Call /chess/take to pick up and discard the piece at square."""
-        file, rank = _parse_square(square)
-        log.info("  [TAKE] clearing %s", square.upper())
-        # chess_driver's take_callback reads end_file / end_rank for the target square.
+    def _take(
+        self,
+        from_sq: str,
+        to_sq: str,
+        piece_name: str = "",
+        captured_piece: str = "unknown",
+    ) -> bool:
+        """Call /chess/take: discard the piece at to_sq then move piece_name from from_sq to to_sq.
+
+        from_sq / piece_name:   the capturing piece and its origin square (start_piece).
+        to_sq / captured_piece: the captured piece's square and its marker name (end_piece).
+        """
+        from_file, from_rank = _parse_square(from_sq)
+        to_file,   to_rank   = _parse_square(to_sq)
+        start_piece = piece_name if piece_name else self._piece_name_at(from_sq)
+        log.info(
+            "  [TAKE] %s captures at %s  (start_piece=%s end_piece=%s)",
+            from_sq.upper(), to_sq.upper(), start_piece, captured_piece,
+        )
         response = self._bridge.call_service(
             SERVICE_TAKE,
             SERVICE_TYPE_MOVE,
             {
-                "start_file": file,
-                "start_rank": rank,
-                "end_file":   file,
-                "end_rank":   rank,
+                "start_file":  from_file,
+                "start_rank":  from_rank,
+                "end_file":    to_file,
+                "end_rank":    to_rank,
+                "start_piece": start_piece,
+                "end_piece":   captured_piece,
             },
         )
         ok = bool(response and response.get("success", False))

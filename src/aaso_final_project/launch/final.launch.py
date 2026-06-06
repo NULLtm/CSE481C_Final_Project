@@ -4,24 +4,12 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 import os
-from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
 
 def generate_launch_description():
     # Helper to find package directories
     stretch_core_dir = get_package_share_directory('stretch_core')
     aaso_project_dir = get_package_share_directory('aaso_final_project')
     rosbridge_dir = get_package_share_directory('rosbridge_server')
-
-    rosbridge_dir = get_package_share_directory('rosbridge_server')
-    rosbridge_launch_file = os.path.join(rosbridge_dir, 'launch', 'rosbridge_websocket_launch.xml')
-
-    # rviz_node = Node(
-    #     package='rviz2',
-    #     executable='rviz2',
-    #     name='rviz2',
-    #     arguments=['-d', '/home/hello-robot/ament_ws/src/stretch_tutorials/rviz/aruco_detector_example.rviz'],
-    #     output='screen'
-    # )
 
     return LaunchDescription([
         # 1. ros2 launch stretch_core d405_basic.launch.py
@@ -46,9 +34,14 @@ def generate_launch_description():
         ),
 
         IncludeLaunchDescription(
-            # CHANGE: Use the XML source loader here
-            XMLLaunchDescriptionSource(rosbridge_launch_file)
-        )
+            PythonLaunchDescriptionSource(
+                os.path.join(rosbridge_dir, 'launch', 'rosbridge_websocket_launch.xml')
+            )
+        ),
 
-        # //rviz_node
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(aaso_project_dir, 'launch', 'chess_driver.launch.py')
+            )
+        )
     ])

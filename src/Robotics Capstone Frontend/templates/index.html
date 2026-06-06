@@ -960,9 +960,23 @@
       // (local state only updates when server echoes back a FEN).
       const isRobotMove = robotPlayers[chess.turn()];
 
-<<<<<<< Updated upstream
-      // Capture the piece name BEFORE updating the identity map.
+      // Capture both piece names BEFORE updating the identity map (which deletes
+      // the captured piece's entry).
       const pieceName = pieceIdentity[from] || '';
+
+      const moves = chess.moves({ verbose: true });
+      const moveObj = moves.find(m =>
+        m.from === from && m.to === to && (!promotion || m.promotion === promotion)
+      );
+      let capturedPieceName = '';
+      if (moveObj && moveObj.captured) {
+        if (moveObj.flags.includes('e')) {
+          // En passant: captured pawn is on same file as destination, same rank as origin
+          capturedPieceName = pieceIdentity[to[0] + from[1]] || '';
+        } else {
+          capturedPieceName = pieceIdentity[to] || '';
+        }
+      }
 
       // Update piece identity tracking and refresh board labels.
       updatePieceIdentityOnMove(from, to, promotion);
@@ -991,7 +1005,7 @@
 
       isBoardLocked = true;
       $('#boardOverlay').addClass('active');
-      const msg = { from, to, robot: isRobotMove, piece: pieceName };
+      const msg = { from, to, robot: isRobotMove, piece: pieceName, captured_piece: capturedPieceName };
       if (promotion) msg.promotion = promotion;
       socket.send(JSON.stringify(msg));
     }

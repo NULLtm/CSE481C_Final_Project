@@ -252,7 +252,8 @@ async def websocket_endpoint(ws: WebSocket):
             from_sq    = data.get("from", "")
             to_sq      = data.get("to", "")
             robot_move = bool(data.get("robot", False))
-            piece_name = data.get("piece", "")   # e.g. "WhitePawn3" from the UI identity tracker
+            piece_name = data.get("piece", "")            # e.g. "WhitePawn3" from the UI identity tracker
+            captured_piece_name = data.get("captured_piece", "")  # e.g. "BlackPawn5", populated on captures
 
             if not from_sq or not to_sq:
                 await ws.send_text(json.dumps({"fen": game.fen, "event": "error",
@@ -329,12 +330,13 @@ async def websocket_endpoint(ws: WebSocket):
                             fsq=from_sq, tsq=to_sq,
                             cap=game.last_move_was_capture(),
                             cr=castling_rook, ep=ep_capture_sq, pm=promo_marker_id,
-                            pn=piece_name,
+                            pn=piece_name, cpn=captured_piece_name,
                         ):
                             await robot.execute_move(
                                 from_square=fsq, to_square=tsq, is_capture=cap,
                                 castling_rook=cr, ep_capture_sq=ep,
                                 promo_marker_id=pm, piece_name=pn,
+                                captured_piece_name=cpn,
                             )
                             await manager.broadcast({"event": "robot_idle"})
 
