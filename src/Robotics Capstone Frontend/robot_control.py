@@ -76,7 +76,7 @@ class _RosBridge:
     the robot is unreachable — the rest of the game logic still runs.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, host, port) -> None:
         try:
             import roslibpy
             self._rp = roslibpy
@@ -89,15 +89,15 @@ class _RosBridge:
             self._ros = None
             return
 
-        self._ros = self._rp.Ros(host=ROSBRIDGE_HOST, port=ROSBRIDGE_PORT)
-        log.info("RosBridge: connecting to ws://%s:%d …", ROSBRIDGE_HOST, ROSBRIDGE_PORT)
+        self._ros = self._rp.Ros(host=host, port=port)
+        log.info("RosBridge: connecting to ws://%s:%d …", host, port)
 
         # run() starts the event loop AND blocks until connected (or times out).
         # We call it in a daemon thread so FastAPI startup is never blocked.
         def _connect():
             try:
                 self._ros.run(timeout=10.0)
-                log.info("RosBridge: connected to ws://%s:%d", ROSBRIDGE_HOST, ROSBRIDGE_PORT)
+                log.info("RosBridge: connected to ws://%s:%d", host, port)
             except Exception as exc:
                 log.warning("RosBridge: could not connect (%s) — robot moves disabled.", exc)
 
@@ -181,11 +181,12 @@ class RobotController:
     decides which services to call and in what order.
     """
 
-    def __init__(self) -> None:
-        self._bridge = _RosBridge()
+    def __init__(self, host, port) -> None:
+        self._bridge = _RosBridge(host, port)
         self._busy   = False
         self._latest_board_state: dict[int, str] = {}
         self._bridge.subscribe_board_state(self._on_board_state)
+
 
     # ------------------------------------------------------------------
     # Public API
