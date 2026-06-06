@@ -4,8 +4,8 @@ string start_rank
 string start_file
 string end_rank
 string end_file
-string start_piece
-string end_piece
+string start_piece   # ArUco marker name of the piece being moved, e.g. "WhitePawn3"
+string end_piece     # ArUco marker name of the piece at the destination ("unknown" if empty)
 ---
 # Response (Server -> Client)
 string message
