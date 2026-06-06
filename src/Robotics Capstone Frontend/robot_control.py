@@ -40,6 +40,21 @@ SERVICE_TIMEOUT = 120.0
 
 
 # ---------------------------------------------------------------------------
+# ArUco marker ID → piece name  (matches stretch_marker_dict.yaml, IDs 1-32)
+# ---------------------------------------------------------------------------
+MARKER_NAMES: dict[int, str] = {
+    1:  "BlackRook1",   2:  "BlackPawn1",   3:  "WhitePawn1",   4:  "WhiteRook1",
+    5:  "BlackKnight1", 6:  "BlackPawn2",   7:  "WhitePawn2",   8:  "WhiteKnight1",
+    9:  "BlackBishop1", 10: "BlackPawn3",   11: "WhitePawn3",   12: "WhiteBishop1",
+    13: "BlackQueen1",  14: "BlackPawn4",   15: "WhitePawn4",   16: "WhiteQueen1",
+    17: "BlackKing1",   18: "BlackPawn5",   19: "WhitePawn5",   20: "WhiteKing1",
+    21: "BlackBishop2", 22: "BlackPawn6",   23: "WhitePawn6",   24: "WhiteBishop2",
+    25: "BlackKnight2", 26: "BlackPawn7",   27: "WhitePawn7",   28: "WhiteKnight2",
+    29: "BlackRook2",   30: "BlackPawn8",   31: "WhiteRook2",   32: "WhitePawn8",
+}
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -187,6 +202,17 @@ class RobotController:
     def _on_board_state(self, pieces: dict[int, str]) -> None:
         self._latest_board_state = pieces
 
+    def _piece_name_at(self, square: str) -> str:
+        """
+        Return the ArUco marker name of the piece currently at `square`,
+        e.g. 'WhitePawn3'.  Falls back to 'unknown' if the camera hasn't
+        seen a piece there or the board state hasn't been received yet.
+        """
+        for marker_id, sq in self._latest_board_state.items():
+            if sq == square:
+                return MARKER_NAMES.get(marker_id, "unknown")
+        return "unknown"
+
     async def execute_move(
         self,
         from_square: str,
@@ -263,7 +289,8 @@ class RobotController:
         """Call /chess/move to pick up the piece at from_sq and place it at to_sq."""
         from_file, from_rank = _parse_square(from_sq)
         to_file,   to_rank   = _parse_square(to_sq)
-        log.info("  [MOVE] %s → %s", from_sq.upper(), to_sq.upper())
+        piece = self._piece_name_at(from_sq)
+        log.info("  [MOVE] %s → %s  (piece=%s)", from_sq.upper(), to_sq.upper(), piece)
         response = self._bridge.call_service(
             SERVICE_MOVE,
             SERVICE_TYPE_MOVE,
@@ -272,6 +299,7 @@ class RobotController:
                 "start_rank": from_rank,
                 "end_file":   to_file,
                 "end_rank":   to_rank,
+                "piece":      piece,
             },
         )
         ok = bool(response and response.get("success", False))
@@ -284,7 +312,8 @@ class RobotController:
     def _take(self, square: str) -> bool:
         """Call /chess/take to pick up and discard the piece at square."""
         file, rank = _parse_square(square)
-        log.info("  [TAKE] clearing %s", square.upper())
+        piece = self._piece_name_at(square)
+        log.info("  [TAKE] clearing %s  (piece=%s)", square.upper(), piece)
         # chess_driver's take_callback reads end_file / end_rank for the target square.
         response = self._bridge.call_service(
             SERVICE_TAKE,
@@ -294,6 +323,7 @@ class RobotController:
                 "start_rank": rank,
                 "end_file":   file,
                 "end_rank":   rank,
+                "piece":      piece,
             },
         )
         ok = bool(response and response.get("success", False))
