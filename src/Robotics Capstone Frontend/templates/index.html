@@ -341,6 +341,70 @@
     .transcript-box .error-text  { color: var(--highlight); }
 
     /* ------------------------------------------------------------------ */
+    /* Player Robot / Human Controls                                      */
+    /* ------------------------------------------------------------------ */
+    .player-controls {
+      display: flex;
+      gap: 12px;
+      width: 100%;
+      max-width: 380px;
+    }
+
+    .player-ctrl {
+      flex: 1;
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .player-ctrl-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .ctrl-toggle {
+      display: flex;
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+      padding: 3px;
+      gap: 3px;
+    }
+
+    .ctrl-btn {
+      flex: 1;
+      padding: 7px 6px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      background: transparent;
+      color: var(--text-muted);
+      transition: background 0.2s, color 0.2s;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .ctrl-btn.active[data-type="human"] {
+      background: var(--accent);
+      color: var(--text-primary);
+    }
+
+    .ctrl-btn.active[data-type="robot"] {
+      background: var(--highlight);
+      color: #fff;
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Select Panel hint                                                   */
     /* ------------------------------------------------------------------ */
     .select-hint {
@@ -586,6 +650,28 @@
     </button>
   </div>
 
+  <!-- Per-player robot / human toggle -->
+  <div class="player-controls">
+    <div class="player-ctrl">
+      <div class="player-ctrl-label">
+        <div class="turn-swatch"></div> White
+      </div>
+      <div class="ctrl-toggle">
+        <button class="ctrl-btn active" data-color="w" data-type="human">Human</button>
+        <button class="ctrl-btn"        data-color="w" data-type="robot">Robot</button>
+      </div>
+    </div>
+    <div class="player-ctrl">
+      <div class="player-ctrl-label">
+        <div class="turn-swatch black"></div> Black
+      </div>
+      <div class="ctrl-toggle">
+        <button class="ctrl-btn active" data-color="b" data-type="human">Human</button>
+        <button class="ctrl-btn"        data-color="b" data-type="robot">Robot</button>
+      </div>
+    </div>
+  </div>
+
   <div class="board-card">
 
     <div class="board-wrapper">
@@ -604,9 +690,9 @@
       <button class="mic-btn" id="micBtn" aria-label="Hold to speak your move">
         &#127908;
       </button>
-      <span class="mic-label" id="micLabel">TAP TO SPEAK</span>
+      <span class="mic-label" id="micLabel">TAP TO RECORD</span>
       <div class="transcript-box" id="transcriptBox">
-        <span class="hint-text">Say &ldquo;Robochess move e2 to e4&rdquo;</span>
+        <span class="hint-text">Say &ldquo;e2 to e4&rdquo;</span>
       </div>
     </div>
 
@@ -660,6 +746,20 @@
   let currentMode = 'select'; // 'select' | 'voice'
   let selectedSquare = null;
   let moveNumber = 1;
+
+  // Tracks whether each player's moves should be physically executed by the robot.
+  // false = human only (digital board updates, robot stays still)
+  // true  = robot executes the move on the physical board
+  const robotPlayers = { w: false, b: false };
+
+  $('.ctrl-btn').on('click', function () {
+    const color = $(this).data('color');
+    const type  = $(this).data('type');
+    robotPlayers[color] = (type === 'robot');
+    // Update active highlight within this player's toggle group
+    $(`.ctrl-btn[data-color="${color}"]`).removeClass('active');
+    $(this).addClass('active');
+  });
 
   // =========================================================================
   // WebSocket
@@ -736,9 +836,15 @@
 
   function sendMove(from, to, promotion) {
     if (socket && socket.readyState === WebSocket.OPEN) {
-      isBoardLocked = true; // Lock the board!
-      $('#boardOverlay').addClass('active'); // Turn on overlay
-      socket.send(JSON.stringify({ from, to }));
+      // chess.turn() is still the moving player's colour at this point
+      // because the local chess.js state only updates when the server echoes
+      // back a FEN — so this correctly captures whose move it is.
+      const isRobotMove = robotPlayers[chess.turn()];
+      isBoardLocked = true;
+      $('#boardOverlay').addClass('active');
+      const msg = { from, to, robot: isRobotMove };
+      if (promotion) msg.promotion = promotion;
+      socket.send(JSON.stringify(msg));
     }
   }
 
@@ -800,7 +906,7 @@
   // =========================================================================
   const SUBTITLES = {
     select: 'Tap or drag a piece to move.',
-    voice:  'Say "Robochess move [from] [to]" — e.g. "Robochess move e2 to e4".',
+    voice:  'Tap mic → say "e2 to e4" → tap to stop.',
   };
 
   function switchMode(mode) {
@@ -810,13 +916,13 @@
     $(`.mode-btn[data-mode="${mode}"]`).addClass('active');
 
     if (mode === 'voice') {
-      $('#voicePanel').show();
+      $('#voicePanel').removeAttr('hidden');
       $('#selectHint').hide();
-      startListening();   // begin always-on listening immediately
+      // Don't auto-start — user must tap the mic to begin recording
     } else {
-      $('#voicePanel').hide();
+      $('#voicePanel').attr('hidden', '');
       $('#selectHint').show();
-      stopListening();    // stop listening when leaving voice mode
+      stopListening();    // abort any in-progress recording when leaving voice mode
     }
 
     $('#modeSubtitle').text(SUBTITLES[mode]);
@@ -888,91 +994,18 @@
   }
 
   // =========================================================================
-  // VOICE COMMAND MODE
+  // VOICE COMMAND MODE  (faster-whisper via POST /transcribe)
   // =========================================================================
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let recognizer  = null;
-  let listening   = false;
+  let mediaRecorder = null;
+  let audioChunks   = [];
+  let listening     = false;
 
-  if (SpeechRecognition) {
-    recognizer = new SpeechRecognition();
-    recognizer.lang        = 'en-US';
-    recognizer.interimResults = true;
-    recognizer.continuous  = true;
-    recognizer.maxAlternatives = 3;
-
-    recognizer.addEventListener('result', (evt) => {
-      // In continuous mode, resultIndex points to the newest result only.
-      const result  = evt.results[evt.resultIndex];
-      const interim = result[0].transcript;
-
-      // Show interim (in-progress) transcript while the user is still speaking.
-      if (!result.isFinal) {
-        setVoiceResult(`"${interim}"`, 'heard');
-        return;
-      }
-
-      // Final result — scan all alternatives for the wake phrase.
-      // Accepted forms: "Robochess move …", "Robo chess move …", "Robot chess move …"
-      const WAKE_RE = /rob(?:o\s*|ot\s*)chess\s+move\s+(.*)/i;
-      let commandText = null;
-      for (let i = 0; i < result.length; i++) {
-        const m = result[i].transcript.match(WAKE_RE);
-        if (m) { commandText = m[1].trim(); break; }
-      }
-
-      if (!commandText) {
-        // Wake phrase not heard — keep listening silently.
-        setVoiceResult('<span class="hint-text">Listening… say &ldquo;Robochess move e2 to e4&rdquo;</span>');
-        return;
-      }
-
-      // Wake phrase detected — try to parse the move that followed it.
-      const parsed = parseVoiceMove(commandText);
-      if (parsed) {
-        setVoiceResult(
-          `<span class="parsed-move">Moving: ${parsed.from.toUpperCase()} → ${parsed.to.toUpperCase()}</span>`
-        );
-        if (isPromotion(parsed.from, parsed.to)) {
-          requestPromotion(parsed.from, parsed.to);
-        } else {
-          sendMove(parsed.from, parsed.to);
-        }
-      } else {
-        setVoiceResult(
-          `<span class="error-text">Heard wake phrase but couldn't parse move: "${escHtml(commandText)}"</span>`
-        );
-      }
-    });
-
-    recognizer.addEventListener('end', () => {
-      // In continuous mode the browser can stop recognition after a long silence
-      // or a network hiccup.  Restart automatically as long as we're supposed to
-      // be listening so the user never has to tap the button again.
-      if (listening) {
-        try { recognizer.start(); } catch (_) { /* already starting */ }
-      } else {
-        updateMicUI();
-      }
-    });
-
-    recognizer.addEventListener('error', (evt) => {
-      listening = false;
-      updateMicUI();
-      const msg = evt.error === 'not-allowed'
-        ? 'Microphone access denied. Check browser permissions.'
-        : `Speech error: ${evt.error}`;
-      setVoiceResult(msg, 'error');
-    });
-  }
-
+  // Tap mic to START recording.  Tap again to STOP — audio is POSTed to
+  // /transcribe, whisper transcribes it, and the result is checked for the
+  // wake phrase "Robochess move <from> <to>".
   $('#micBtn').on('click', () => {
-    if (!SpeechRecognition) {
-      setVoiceResult('Speech recognition is not supported in this browser.', 'error');
-      return;
-    }
     if (isBoardLocked) {
-      setVoiceResult('Waiting for server...', 'hint');
+      setVoiceResult('Waiting for robot to finish…', 'error');
       return;
     }
     if (listening) {
@@ -982,24 +1015,94 @@
     }
   });
 
-  function startListening() {
-    if (!recognizer || listening) return;
+  async function startListening() {
+    if (listening) return;
+    let stream;
     try {
-      recognizer.start();
-      listening = true;
-      updateMicUI();
-      setVoiceResult('<span class="hint-text">Listening…</span>');
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
-      setVoiceResult('Could not start microphone.', 'error');
+      setVoiceResult('Microphone access denied. Check browser permissions.', 'error');
+      console.error('[Voice] getUserMedia error:', e);
+      return;
     }
+
+    audioChunks   = [];
+    mediaRecorder = new MediaRecorder(stream);
+
+    mediaRecorder.ondataavailable = (evt) => {
+      if (evt.data && evt.data.size > 0) audioChunks.push(evt.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      // Release the microphone immediately after recording stops.
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(audioChunks, { type: 'audio/webm' });
+      console.log('[Voice] recording stopped — blob size:', blob.size, 'bytes');
+      await transcribeAndProcess(blob);
+    };
+
+    mediaRecorder.start();
+    listening = true;
+    updateMicUI();
+    setVoiceResult('<span class="hint-text">Recording… tap to stop</span>');
+    console.log('[Voice] recording started');
   }
 
   function stopListening() {
-    if (recognizer && listening) {
-      recognizer.stop();
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      mediaRecorder.stop();   // triggers onstop → transcribeAndProcess
     }
     listening = false;
     updateMicUI();
+  }
+
+  async function transcribeAndProcess(blob) {
+    setVoiceResult('<span class="hint-text">Transcribing…</span>');
+
+    const formData = new FormData();
+    formData.append('file', blob, 'audio.webm');
+
+    let transcript = '';
+    try {
+      const res  = await fetch('/transcribe', { method: 'POST', body: formData });
+      const data = await res.json();
+      transcript = (data.text || '').trim();
+      console.log('[Voice] raw transcript:', JSON.stringify(transcript));
+      if (data.error) console.warn('[Voice] server error:', data.error);
+    } catch (e) {
+      setVoiceResult('Transcription request failed.', 'error');
+      console.error('[Voice] fetch error:', e);
+      return;
+    }
+
+    if (!transcript) {
+      setVoiceResult('<span class="hint-text">Nothing heard — try again</span>');
+      return;
+    }
+
+    // Show the full raw transcript so the user can see exactly what was heard.
+    console.log('[Voice] transcript received:', JSON.stringify(transcript));
+    setVoiceResult(`<span class="heard-text">"${escHtml(transcript)}"</span>`);
+
+    // Try to parse a chess move directly from whatever was said.
+    const parsed = parseVoiceMove(transcript);
+    if (parsed) {
+      console.log('[Voice] parsed move:', parsed.from, '→', parsed.to);
+      setVoiceResult(
+        `<span class="parsed-move">Moving: ${parsed.from.toUpperCase()} → ${parsed.to.toUpperCase()}</span>`
+      );
+      if (isPromotion(parsed.from, parsed.to)) {
+        requestPromotion(parsed.from, parsed.to);
+      } else {
+        sendMove(parsed.from, parsed.to);
+      }
+    } else {
+      console.log('[Voice] could not parse a move from:', transcript);
+      setVoiceResult(
+        `<span class="heard-text">"${escHtml(transcript)}"</span>` +
+        `<br><span class="error-text">Couldn't find a move — try &ldquo;e2 to e4&rdquo;</span>`
+      );
+    }
   }
 
   function updateMicUI() {
@@ -1008,9 +1111,9 @@
     $btn.removeClass('listening processing');
     if (listening) {
       $btn.addClass('listening');
-      $lbl.text('ALWAYS LISTENING — TAP TO STOP');
+      $lbl.text('RECORDING — TAP TO STOP');
     } else {
-      $lbl.text('TAP TO START LISTENING');
+      $lbl.text('TAP TO RECORD');
     }
   }
 
@@ -1059,6 +1162,28 @@
     });
   }
 
+  // Extract chess squares from a transcript, handling Whisper quirks:
+  //   "b1 to b3"  → strict word-boundary match works fine
+  //   "b1b3"      → squares jammed together with no separator
+  //   "b12b3"     → extra digit inserted (Whisper hears "to" as "2" or "12")
+  function extractSquares(text) {
+    // 1. Strict pass — word boundaries (covers normal speech and "e2 e4")
+    const strict = text.match(/\b[a-h][1-8]\b/g);
+    if (strict && strict.length >= 2) return strict;
+
+    // 2. Loose pass — match [a-h] followed by one or more digits and keep
+    //    only the first digit as the rank.  This handles concatenated squares
+    //    ("b1b3" → b1, b3) and extra digits ("b12b3" → b1, b3).
+    const loose = [];
+    const re = /[a-h]\d+/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const rank = m[0][1]; // first digit after the file letter
+      if (rank >= '1' && rank <= '8') loose.push(m[0][0] + rank);
+    }
+    return loose.length >= 2 ? loose : null;
+  }
+
   function parseVoiceMove(text) {
     text = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').trim();
 
@@ -1068,8 +1193,8 @@
     if (isQueenside) return resolveSAN('O-O-O');
     if (isKingside)  return resolveSAN('O-O');
 
-    // Two explicit squares: "e2 to e4", "e2e4", "a1 b3"
-    const squares = text.match(/\b[a-h][1-8]\b/g);
+    // Two explicit squares — strict first, loose fallback for Whisper quirks
+    const squares = extractSquares(text);
     if (squares && squares.length >= 2) {
       return { from: squares[0], to: squares[1] };
     }
@@ -1077,8 +1202,8 @@
     // Piece name + destination: "knight to f3", "bishop takes e5"
     for (const [word, letter] of Object.entries(PIECE_WORDS)) {
       if (text.includes(word)) {
-        const destMatch = text.match(/\b([a-h][1-8])\b/);
-        if (destMatch) return resolveByPiece(letter, destMatch[1]);
+        const dest = extractSquares(text);
+        if (dest) return resolveByPiece(letter, dest[0]);
         break;
       }
     }
