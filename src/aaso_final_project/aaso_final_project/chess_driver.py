@@ -262,6 +262,21 @@ class ChessDriver(Node):
         if self.drop(response):
             response.message = f"Successfully moved piece."
         return response
+<<<<<<< Updated upstream
+=======
+
+    def move(self, response, start_file, start_rank, end_file, end_rank, piece):
+        if self.move_to_square(start_file, start_rank, response=response) is False:
+            return False
+
+        if self.grab(response, piece) is False:
+            return False     
+
+        if self.move_to_square(end_file, end_rank, response=response) is False:
+            return False
+        
+        return self.drop(response)
+>>>>>>> Stashed changes
     
     def take_callback(self, request, response):
 
@@ -269,21 +284,31 @@ class ChessDriver(Node):
         if self.move_to_square(request.end_file, request.end_rank, response=response) is False:
             return response
 
+<<<<<<< Updated upstream
         # grab
         if self.grab(response) is False:
+=======
+        if self.grab(response, request.end_piece) is False:
+>>>>>>> Stashed changes
             return response
-        
+
         if self.gripper_discard_position(response=response) is False:
             return response
-        
+
         if self.open_gripper(response) is False:
             return response
-        
+
         if self.gripper_reset_position(response) is False:
             return response
+<<<<<<< Updated upstream
         
         if self.move_callback(request, response):
             response.message = "Successfully taken piece!"
+=======
+
+        if self.move(response, request.start_file, request.start_rank, request.end_file, request.end_rank, request.start_piece):
+            response.message = f"Successfully moved piece."
+>>>>>>> Stashed changes
             response.success = True
         return response
 
@@ -398,8 +423,13 @@ class ChessDriver(Node):
         # 1. Get transforms of all three markers relative to the robot's base
         # Replace 'finger_left' and 'finger_right' with your actual frame names (e.g., 'rank_200')
         trans_left = self.get_marker_transform('link_aruco_fingertip_left', 'base_link')
+<<<<<<< Updated upstream
         trans_right = self.tf_buffer.lookup_transform('link_aruco_fingertip_right', 'base_link')
         trans_target = self.tf_buffer.lookup_transform('BlackPawn3', 'base_link')
+=======
+        trans_right = self.get_marker_transform('link_aruco_fingertip_right', 'base_link')
+        trans_target = self.get_marker_transform(piece, 'base_link')
+>>>>>>> Stashed changes
 
         # 2. Calculate the midpoint of the two fingertip markers
         mid_x = (trans_left.transform.translation.x + trans_right.transform.translation.x) / 2.0

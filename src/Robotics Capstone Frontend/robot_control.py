@@ -33,7 +33,7 @@ BOARD_STATE_TOPIC = "/chess/board_state"   # std_msgs/String (JSON from aruco no
 
 SERVICE_MOVE      = "/chess/move"          # interfaces/srv/Move
 SERVICE_TAKE      = "/chess/take"          # interfaces/srv/Move (same type)
-SERVICE_TYPE_MOVE = "interfaces/srv/Move"
+SERVICE_TYPE_MOVE = "interfaces/Move"
 
 # Seconds to wait for a service response — robot moves are slow.
 SERVICE_TIMEOUT = 120.0
@@ -179,6 +179,15 @@ class RobotController:
     @property
     def is_busy(self) -> bool:
         return self._busy
+
+    def reset(self) -> None:
+        """Send the robot to its stow/home position via the /chess/reset service."""
+        log.info("Stretch reset requested.")
+        self._bridge.call_service(
+            "/chess/reset",
+            "std_srvs/Trigger",
+            {},
+        )
 
     def get_board_state(self) -> dict[int, str]:
         """Return the latest piece→square mapping received from the robot camera."""
