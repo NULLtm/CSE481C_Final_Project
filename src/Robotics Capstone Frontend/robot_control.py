@@ -221,6 +221,7 @@ class RobotController:
         castling_rook: tuple[str, str] | None = None,
         ep_capture_sq: str | None = None,
         promo_marker_id: int | None = None,
+        piece_name: str = "",
     ) -> None:
         """
         Orchestrate the physical move sequence without blocking the asyncio
@@ -234,20 +235,22 @@ class RobotController:
             ep_capture_sq: Square of the pawn removed by en passant, else None.
             promo_marker_id: Ignored — chess_driver handles promotions as a
                              regular move; piece swap is done manually.
+            piece_name:    Full ArUco marker name of the moving piece from the
+                           UI identity tracker (e.g. 'WhitePawn3').
         """
         if self._busy:
             log.warning("Robot busy — dropping move %s → %s", from_square, to_square)
             return
         self._busy = True
         log.info(
-            "Robot executing: %s → %s  (capture=%s castle=%s ep=%s)",
-            from_square, to_square, is_capture, castling_rook, ep_capture_sq,
+            "Robot executing: %s → %s  (capture=%s castle=%s ep=%s piece=%s)",
+            from_square, to_square, is_capture, castling_rook, ep_capture_sq, piece_name,
         )
         try:
             await asyncio.to_thread(
                 self._execute_sync,
                 from_square, to_square, is_capture,
-                castling_rook, ep_capture_sq,
+                castling_rook, ep_capture_sq, piece_name,
             )
         except Exception:
             log.exception("Unhandled error during move %s → %s", from_square, to_square)
@@ -266,17 +269,21 @@ class RobotController:
         is_capture: bool,
         castling_rook: tuple[str, str] | None,
         ep_capture_sq: str | None,
+        piece_name: str = "",
     ) -> None:
-        # 1. Remove the captured piece before moving the capturing piece.
-        #    For en passant the captured pawn is on a different square.
+        # Resolve the captured piece name BEFORE calling _take so the camera
+        # state is still intact (camera still sees the piece on the board).
+        captured_piece_name = "unknown"
         if is_capture:
             capture_sq = ep_capture_sq if ep_capture_sq else to_square
+            captured_piece_name = self._piece_name_at(capture_sq)
             self._take(capture_sq)
 
-        # 2. Move the main piece from its source to its destination.
-        self._move(from_square, to_square)
+        # Move the main piece; pass both piece_start and piece_end so the
+        # robot driver has full context (piece_end is "unknown" for non-captures).
+        self._move(from_square, to_square, piece_name, captured_piece_name)
 
-        # 3. For castling, also move the rook after the king is placed.
+        # For castling, also move the rook (camera lookup for rook identity).
         if castling_rook is not None:
             rook_from, rook_to = castling_rook
             self._move(rook_from, rook_to)
@@ -285,21 +292,37 @@ class RobotController:
     # Service call helpers
     # ------------------------------------------------------------------
 
-    def _move(self, from_sq: str, to_sq: str) -> bool:
-        """Call /chess/move to pick up the piece at from_sq and place it at to_sq."""
+    def _move(
+        self,
+        from_sq: str,
+        to_sq: str,
+        piece_name: str = "",
+        captured_piece: str = "unknown",
+    ) -> bool:
+        """Call /chess/move to pick up the piece at from_sq and place it at to_sq.
+
+        piece_name    → piece_start field: full marker name from UI identity
+                        tracker (e.g. 'WhitePawn3'); falls back to camera if empty.
+        captured_piece → piece_end field: marker name of the piece that was at
+                        to_sq before the move ('unknown' for non-captures).
+        """
         from_file, from_rank = _parse_square(from_sq)
         to_file,   to_rank   = _parse_square(to_sq)
-        piece = self._piece_name_at(from_sq)
-        log.info("  [MOVE] %s → %s  (piece=%s)", from_sq.upper(), to_sq.upper(), piece)
+        piece_start = piece_name if piece_name else self._piece_name_at(from_sq)
+        log.info(
+            "  [MOVE] %s → %s  (piece_start=%s piece_end=%s)",
+            from_sq.upper(), to_sq.upper(), piece_start, captured_piece,
+        )
         response = self._bridge.call_service(
             SERVICE_MOVE,
             SERVICE_TYPE_MOVE,
             {
-                "start_file": from_file,
-                "start_rank": from_rank,
-                "end_file":   to_file,
-                "end_rank":   to_rank,
-                "piece":      piece,
+                "start_file":  from_file,
+                "start_rank":  from_rank,
+                "end_file":    to_file,
+                "end_rank":    to_rank,
+                "piece_start": piece_start,
+                "piece_end":   captured_piece,
             },
         )
         ok = bool(response and response.get("success", False))
@@ -313,17 +336,18 @@ class RobotController:
         """Call /chess/take to pick up and discard the piece at square."""
         file, rank = _parse_square(square)
         piece = self._piece_name_at(square)
-        log.info("  [TAKE] clearing %s  (piece=%s)", square.upper(), piece)
+        log.info("  [TAKE] clearing %s  (piece_start=%s)", square.upper(), piece)
         # chess_driver's take_callback reads end_file / end_rank for the target square.
         response = self._bridge.call_service(
             SERVICE_TAKE,
             SERVICE_TYPE_MOVE,
             {
-                "start_file": file,
-                "start_rank": rank,
-                "end_file":   file,
-                "end_rank":   rank,
-                "piece":      piece,
+                "start_file":  file,
+                "start_rank":  rank,
+                "end_file":    file,
+                "end_rank":    rank,
+                "piece_start": piece,
+                "piece_end":   "unknown",
             },
         )
         ok = bool(response and response.get("success", False))
