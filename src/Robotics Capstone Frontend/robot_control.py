@@ -223,35 +223,38 @@ class RobotController:
         ep_capture_sq: str | None = None,
         promo_marker_id: int | None = None,
         piece_name: str = "",
+        captured_piece_name: str = "",
     ) -> None:
         """
         Orchestrate the physical move sequence without blocking the asyncio
         event loop.  A concurrent call while busy is silently dropped.
 
         Args:
-            from_square:   UCI origin square  (e.g. 'e2').
-            to_square:     UCI destination square (e.g. 'e4').
-            is_capture:    True for captures and en passant.
-            castling_rook: (rook_from, rook_to) for castling, else None.
-            ep_capture_sq: Square of the pawn removed by en passant, else None.
-            promo_marker_id: Ignored — chess_driver handles promotions as a
-                             regular move; piece swap is done manually.
-            piece_name:    Full ArUco marker name of the moving piece from the
-                           UI identity tracker (e.g. 'WhitePawn3').
+            from_square:          UCI origin square  (e.g. 'e2').
+            to_square:            UCI destination square (e.g. 'e4').
+            is_capture:           True for captures and en passant.
+            castling_rook:        (rook_from, rook_to) for castling, else None.
+            ep_capture_sq:        Square of the pawn removed by en passant, else None.
+            promo_marker_id:      Ignored — chess_driver handles promotions as a
+                                  regular move; piece swap is done manually.
+            piece_name:           Full ArUco marker name of the moving piece from the
+                                  UI identity tracker (e.g. 'WhitePawn3').
+            captured_piece_name:  Full ArUco marker name of the captured piece from the
+                                  UI identity tracker (e.g. 'BlackPawn5').
         """
         if self._busy:
             log.warning("Robot busy — dropping move %s → %s", from_square, to_square)
             return
         self._busy = True
         log.info(
-            "Robot executing: %s → %s  (capture=%s castle=%s ep=%s piece=%s)",
-            from_square, to_square, is_capture, castling_rook, ep_capture_sq, piece_name,
+            "Robot executing: %s → %s  (capture=%s castle=%s ep=%s piece=%s captured=%s)",
+            from_square, to_square, is_capture, castling_rook, ep_capture_sq, piece_name, captured_piece_name,
         )
         try:
             await asyncio.to_thread(
                 self._execute_sync,
                 from_square, to_square, is_capture,
-                castling_rook, ep_capture_sq, piece_name,
+                castling_rook, ep_capture_sq, piece_name, captured_piece_name,
             )
         except Exception:
             log.exception("Unhandled error during move %s → %s", from_square, to_square)
@@ -271,13 +274,13 @@ class RobotController:
         castling_rook: tuple[str, str] | None,
         ep_capture_sq: str | None,
         piece_name: str = "",
+        captured_piece_name: str = "",
     ) -> None:
-        # Resolve the captured piece name BEFORE calling _take so the camera
-        # state is still intact (camera still sees the piece on the board).
-        captured_piece_name = "unknown"
         if is_capture:
             capture_sq = ep_capture_sq if ep_capture_sq else to_square
-            captured_piece_name = self._piece_name_at(capture_sq)
+            # Use the UI identity tracker value; fall back to camera only if not provided.
+            if not captured_piece_name:
+                captured_piece_name = self._piece_name_at(capture_sq)
             self._take(capture_sq)
 
         # Move the main piece; pass both piece_start and piece_end so the
