@@ -6,18 +6,36 @@ FastAPI core: validates moves via python-chess, broadcasts FEN, triggers robot.
 import asyncio
 import json
 import logging
+import os
+import tempfile
 from contextlib import asynccontextmanager
 from typing import List
 
 import chess
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi import Request
 
 from robot_control import RobotController
+
+# ---------------------------------------------------------------------------
+# Whisper transcription model (loaded once at startup)
+# ---------------------------------------------------------------------------
+try:
+    from faster_whisper import WhisperModel
+    # "base" balances speed vs accuracy on CPU.  Switch to "small" or "medium"
+    # for better accuracy at the cost of more inference time.
+    # Set device="cuda" and compute_type="float16" if a GPU is available.
+    _whisper = WhisperModel("base", device="cpu", compute_type="int8")
+    log_tmp = logging.getLogger(__name__)
+    log_tmp.info("faster-whisper model loaded (base / CPU / int8)")
+except Exception as _e:
+    _whisper = None
+    logging.getLogger(__name__).warning(
+        "faster-whisper not available — /transcribe will return empty text. (%s)", _e
+    )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -126,6 +144,44 @@ async def get_fen():
     return {"fen": game.fen}
 
 
+@app.post("/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """
+    Receive a browser audio blob (WebM/Opus), run faster-whisper on it,
+    and return the transcript as {"text": "..."}.
+
+    faster-whisper uses ffmpeg internally to decode the audio, so ffmpeg
+    must be installed on this machine:
+        macOS:  brew install ffmpeg
+        Ubuntu: sudo apt install ffmpeg
+    """
+    if _whisper is None:
+        log.warning("/transcribe called but faster-whisper is not available")
+        return {"text": "", "error": "faster-whisper not installed"}
+
+    # Save the upload to a named temp file so faster-whisper can open it.
+    suffix = os.path.splitext(file.filename or "audio.webm")[1] or ".webm"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+
+    try:
+        def _run():
+            # transcribe() returns a lazy generator — consume it here inside
+            # the worker thread so we never block the asyncio event loop.
+            segments, _ = _whisper.transcribe(tmp_path, beam_size=5)
+            return " ".join(seg.text for seg in segments).strip()
+
+        text = await asyncio.to_thread(_run)
+        log.info("Transcription: %r", text)
+        return {"text": text}
+    except Exception as exc:
+        log.error("Transcription error: %s", exc)
+        return {"text": "", "error": str(exc)}
+    finally:
+        os.unlink(tmp_path)
+
+
 @app.post("/reset")
 async def reset_game():
     """Reset the board to the starting position and notify all clients."""
@@ -159,8 +215,9 @@ async def websocket_endpoint(ws: WebSocket):
                                                "detail": "Invalid JSON"}))
                 continue
 
-            from_sq = data.get("from", "")
-            to_sq = data.get("to", "")
+            from_sq    = data.get("from", "")
+            to_sq      = data.get("to", "")
+            robot_move = bool(data.get("robot", False))
 
             if not from_sq or not to_sq:
                 await ws.send_text(json.dumps({"fen": game.fen, "event": "error",
@@ -225,24 +282,27 @@ async def websocket_endpoint(ws: WebSocket):
                         {"fen": game.fen, "event": "game_over", "reason": reason}
                     )
 
-                if robot.is_busy:
-                    await manager.broadcast({
-                        "fen": game.fen, "event": "robot_busy", "uci": uci,
-                    })
-                else:
-                    async def _run_and_notify(
-                        fsq=from_sq, tsq=to_sq,
-                        cap=game.last_move_was_capture(),
-                        cr=castling_rook, ep=ep_capture_sq, pm=promo_marker_id,
-                    ):
-                        await robot.execute_move(
-                            from_square=fsq, to_square=tsq, is_capture=cap,
-                            castling_rook=cr, ep_capture_sq=ep,
-                            promo_marker_id=pm,
-                        )
-                        await manager.broadcast({"event": "robot_idle"})
+                if robot_move:
+                    # Only trigger physical robot movement when the moving
+                    # player has robot control enabled.
+                    if robot.is_busy:
+                        await manager.broadcast({
+                            "fen": game.fen, "event": "robot_busy", "uci": uci,
+                        })
+                    else:
+                        async def _run_and_notify(
+                            fsq=from_sq, tsq=to_sq,
+                            cap=game.last_move_was_capture(),
+                            cr=castling_rook, ep=ep_capture_sq, pm=promo_marker_id,
+                        ):
+                            await robot.execute_move(
+                                from_square=fsq, to_square=tsq, is_capture=cap,
+                                castling_rook=cr, ep_capture_sq=ep,
+                                promo_marker_id=pm,
+                            )
+                            await manager.broadcast({"event": "robot_idle"})
 
-                    asyncio.create_task(_run_and_notify())
+                        asyncio.create_task(_run_and_notify())
             else:
                 # Invalid move: echo the unchanged FEN back to the sender
                 # so chessboard.js performs a visual snapback.
@@ -283,4 +343,20 @@ async def perception_endpoint(ws: WebSocket):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    import os
+    # Use HTTPS if certificates exist (required for Web Speech API on non-localhost).
+    # Generate with: openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -subj '/CN=localhost'
+    ssl_keyfile  = "key.pem"  if os.path.exists("key.pem")  else None
+    ssl_certfile = "cert.pem" if os.path.exists("cert.pem") else None
+    if ssl_certfile:
+        log.info("Starting with HTTPS on port 8000")
+    else:
+        log.info("Starting with HTTP on port 8000 — voice commands only work on localhost")
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=not bool(ssl_certfile),   # reload incompatible with SSL in some uvicorn versions
+        ssl_keyfile=ssl_keyfile,
+        ssl_certfile=ssl_certfile,
+    )
