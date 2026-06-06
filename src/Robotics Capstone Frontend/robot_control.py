@@ -1,138 +1,79 @@
 """
 Accessible Robotic Chess Player — Robot Manipulation Controller
 
-Connects to the Hello Robot Stretch via the rosbridge WebSocket server
-running on the robot at ws://172.28.7.137:9090.
+Connects to chess_driver.py on the Stretch robot via the rosbridge WebSocket
+server running on the robot at ws://ROSBRIDGE_HOST:9090.
 
-Requirements:
-    pip install roslibpy
+All kinematics are handled by chess_driver.py on the robot side.
+This module only translates chess move events into /chess/move and /chess/take
+ROS service calls over the rosbridge connection.
 
 Robot setup (run on the Stretch before starting the frontend):
     ros2 launch rosbridge_server rosbridge_websocket_launch.xml
-    ros2 launch stretch_core stretch_driver.launch.py
-
-Kinematic model
----------------
-The robot stands ALONGSIDE the board, arm facing perpendicular to the rank axis:
-
-    +--- board ---+
-    |  a b c d e f g h  |  <- files (a = near robot, h = far)
-    |  1 2 3 4 5 6 7 8  |  <- ranks sweep via wrist yaw
-    +--- board ---+
-         ^
-      [Stretch]
-
-  joint_lift      → vertical height (z)
-  joint_arm_l0    → arm extension   sweeps files a→h
-  joint_wrist_yaw → wrist rotation  sweeps ranks 1→8
-  joint_gripper_* → aperture
-
-All CALIBRATION constants are in the section below.  Use the Stretch jogging
-tools (e.g. stretch_robot_home.py or keyboard_teleop) to find correct values
-for your physical setup, then update the constants here.
+    ros2 launch aaso_final_project chess_driver.launch.py
 """
 
 import asyncio
 import json
 import logging
 import threading
-import time
 
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Rosbridge connection
+# Rosbridge connection settings
 # ---------------------------------------------------------------------------
 ROSBRIDGE_HOST = "172.28.7.137"
 ROSBRIDGE_PORT = 9090
 
 # ---------------------------------------------------------------------------
-# Stretch joint names  (stretch_ros2 defaults)
+# ROS topics and services
 # ---------------------------------------------------------------------------
-JOINT_LIFT      = "joint_lift"
-JOINT_ARM       = "joint_arm_l0"      # outermost telescoping stage
-JOINT_WRIST_YAW = "joint_wrist_yaw"
-JOINT_GRIP_L    = "joint_gripper_finger_left"
-JOINT_GRIP_R    = "joint_gripper_finger_right"
+BOARD_STATE_TOPIC = "/chess/board_state"   # std_msgs/String (JSON from aruco node)
 
-# ROS 2 topics exposed by stretch_ros2 + rosbridge
-TRAJ_TOPIC         = "/stretch_controller/command"   # trajectory_msgs/JointTrajectory
-STATE_TOPIC        = "/stretch/joint_states"          # sensor_msgs/JointState
-BOARD_STATE_TOPIC  = "/chess/board_state"             # std_msgs/String (JSON from aruco_node)
+SERVICE_MOVE      = "/chess/move"          # interfaces/srv/Move
+SERVICE_TAKE      = "/chess/take"          # interfaces/srv/Move (same type)
+SERVICE_TYPE_MOVE = "interfaces/srv/Move"
 
-# ---------------------------------------------------------------------------
-# CALIBRATION — measure or jog to find values for your physical setup
-# ---------------------------------------------------------------------------
+# Seconds to wait for a service response — robot moves are slow.
+SERVICE_TIMEOUT = 120.0
 
-# Board square size
-SQUARE_M = 0.070          # 57 mm FIDE standard
-
-# Arm extension (metres): arm sweeps across files a (col 0) → h (col 7).
-#   ARM_FILE_A + 7 * SQUARE_M must be ≤ Stretch max extension (~0.52 m).
-#   Start with ARM_FILE_A ≈ 0.12 so ARM_FILE_H ≈ 0.52 m.
-ARM_FILE_A = 0.12         # [CALIBRATE] extension when pointing at file a
-
-# Wrist yaw (radians): sweeps ranks 1 (row 0) → 8 (row 7).
-#   Total angular span ≈ atan2(7 * SQUARE_M, arm_midpoint).
-#   At arm_midpoint ≈ 0.32 m: total ≈ 0.89 rad → WRIST_PER_RANK ≈ 0.127.
-WRIST_RANK1    = -0.44    # [CALIBRATE] yaw angle aligned with rank 1
-WRIST_PER_RANK =  0.127   # [CALIBRATE] radians per rank step
-
-# Lift heights (metres)
-LIFT_TRAVEL = 0.80        # clearance height for arm transit between squares
-LIFT_PICK   = 0.50        # height to close gripper around a piece  [CALIBRATE]
-LIFT_PLACE  = 0.52        # height to open gripper when placing     [CALIBRATE]
-
-# Gripper joint positions (Stretch finger joints use radians)
-GRIP_OPEN   =  0.165      # fully open
-GRIP_CLOSED = -0.10       # gripping a chess piece  [CALIBRATE for piece diameter]
-
-# Joint-settling tolerances and wait caps
-TOL_M     = 0.03          # metres  — lift and arm
-TOL_RAD   = 0.05          # radians — wrist and gripper
-WAIT_ARM  = 10.0          # seconds before giving up on arm/wrist/lift move
-WAIT_GRIP =  3.0          # seconds before giving up on gripper move
 
 # ---------------------------------------------------------------------------
-# Graveyard — captured pieces deposited in a 2-row × 8-col grid
+# ArUco marker ID → piece name  (matches stretch_marker_dict.yaml, IDs 1-32)
 # ---------------------------------------------------------------------------
-GRAVE_ARM_BASE   = 0.10   # arm extension (retracted, away from the board)
-GRAVE_WRIST_BASE = -0.80  # wrist yaw pointing toward the graveyard zone
-GRAVE_LIFT_DROP  =  0.55  # height to release a captured piece
-GRAVE_SLOT_STEP  =  0.07  # spacing between graveyard slots (metres per slot)
-
-# ---------------------------------------------------------------------------
-# Promotion staging areas (IDs 49 = WhitePromo, 50 = BlackPromo)
-# One promoted piece of each type waits at each promo area before a game.
-# The robot picks from here after depositing the promoting pawn.
-# ---------------------------------------------------------------------------
-PROMO_JOINTS: dict[int, dict] = {
-    49: {   # WhitePromo — near white's back-rank corners
-        JOINT_LIFT:      LIFT_TRAVEL,
-        JOINT_ARM:       0.08,    # [CALIBRATE]
-        JOINT_WRIST_YAW: 0.60,    # [CALIBRATE]
-    },
-    50: {   # BlackPromo — near black's back-rank corners
-        JOINT_LIFT:      LIFT_TRAVEL,
-        JOINT_ARM:       0.08,    # [CALIBRATE]
-        JOINT_WRIST_YAW: -0.80,   # [CALIBRATE]
-    },
+MARKER_NAMES: dict[int, str] = {
+    1:  "BlackRook1",   2:  "BlackPawn1",   3:  "WhitePawn1",   4:  "WhiteRook1",
+    5:  "BlackKnight1", 6:  "BlackPawn2",   7:  "WhitePawn2",   8:  "WhiteKnight1",
+    9:  "BlackBishop1", 10: "BlackPawn3",   11: "WhitePawn3",   12: "WhiteBishop1",
+    13: "BlackQueen1",  14: "BlackPawn4",   15: "WhitePawn4",   16: "WhiteQueen1",
+    17: "BlackKing1",   18: "BlackPawn5",   19: "WhitePawn5",   20: "WhiteKing1",
+    21: "BlackBishop2", 22: "BlackPawn6",   23: "WhitePawn6",   24: "WhiteBishop2",
+    25: "BlackKnight2", 26: "BlackPawn7",   27: "WhitePawn7",   28: "WhiteKnight2",
+    29: "BlackRook2",   30: "BlackPawn8",   31: "WhiteRook2",   32: "WhitePawn8",
 }
 
-VERIFY_TIMEOUT = 5.0   # seconds to wait for camera confirmation after a place
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _parse_square(square: str) -> tuple[str, str]:
+    """Split a UCI square string (e.g. 'e4') into (file='e', rank='4')."""
+    return square[0].lower(), square[1]
 
 
 # ---------------------------------------------------------------------------
-# _RosBridge — low-level roslibpy wrapper
+# _RosBridge — roslibpy wrapper
 # ---------------------------------------------------------------------------
 
 class _RosBridge:
     """
-    Manages the roslibpy WebSocket client.
+    Thin wrapper around roslibpy that provides synchronous service calls
+    and topic subscriptions over the rosbridge WebSocket.
 
-    Gracefully degrades to log-only mode when roslibpy is not installed or
-    the rosbridge server is unreachable — the rest of the game logic still
-    runs and the board state is still updated for the UI.
+    Degrades gracefully to log-only mode when roslibpy is not installed or
+    the robot is unreachable — the rest of the game logic still runs.
     """
 
     def __init__(self) -> None:
@@ -141,101 +82,75 @@ class _RosBridge:
             self._rp = roslibpy
         except ImportError:
             log.warning(
-                "roslibpy not installed — robot will NOT move.  "
+                "roslibpy not installed — robot will NOT move. "
                 "Install with: pip install roslibpy"
             )
             self._rp = None
             self._ros = None
-            self._pub = None
             return
 
         self._ros = self._rp.Ros(host=ROSBRIDGE_HOST, port=ROSBRIDGE_PORT)
-        self._ros.run_in_thread()   # background WebSocket thread; auto-reconnects
         log.info("RosBridge: connecting to ws://%s:%d …", ROSBRIDGE_HOST, ROSBRIDGE_PORT)
 
-        self._pub = self._rp.Topic(
-            self._ros, TRAJ_TOPIC, "trajectory_msgs/JointTrajectory"
-        )
+        # run() starts the event loop AND blocks until connected (or times out).
+        # We call it in a daemon thread so FastAPI startup is never blocked.
+        def _connect():
+            try:
+                self._ros.run(timeout=10.0)
+                log.info("RosBridge: connected to ws://%s:%d", ROSBRIDGE_HOST, ROSBRIDGE_PORT)
+            except Exception as exc:
+                log.warning("RosBridge: could not connect (%s) — robot moves disabled.", exc)
+
+        threading.Thread(target=_connect, daemon=True).start()
 
     @property
     def connected(self) -> bool:
         return self._ros is not None and self._ros.is_connected
 
-    def publish_trajectory(self, joints: dict[str, float],
-                           duration_sec: float = 5.0) -> None:
+    def call_service(self, name: str, srv_type: str, request_dict: dict) -> dict | None:
         """
-        Publish a single-waypoint JointTrajectory to move to `joints`
-        within `duration_sec` seconds.
+        Call a ROS service and block until the response arrives.
+
+        Returns the response as a dict on success, or None if the connection
+        is down, the call times out, or the service returns an error.
         """
-        if self._pub is None:
-            log.info("[log-only] JointTrajectory → %s  (%.1f s)", joints, duration_sec)
-            return
+        if self._rp is None:
+            log.info("[log-only] %s %s", name, request_dict)
+            return {"success": True, "message": "log-only mode"}
+
         if not self.connected:
-            log.warning("RosBridge not connected — trajectory dropped.")
-            return
+            log.warning("RosBridge not connected — dropping service call: %s", name)
+            return None
 
-        sec     = int(duration_sec)
-        nanosec = int((duration_sec - sec) * 1_000_000_000)
-        msg = {
-            "joint_names": list(joints.keys()),
-            "points": [{
-                "positions":     list(joints.values()),
-                "velocities":    [],
-                "accelerations": [],
-                "effort":        [],
-                "time_from_start": {"sec": sec, "nanosec": nanosec},
-            }],
-        }
-        self._pub.publish(self._rp.Message(msg))
-        log.debug("JointTrajectory published → %s", joints)
+        result = [None]
+        error  = [None]
+        done   = threading.Event()
 
-    def wait_for_joints(self, targets: dict[str, float],
-                        timeout: float = WAIT_ARM) -> bool:
-        """
-        Subscribe to STATE_TOPIC and block until every joint in `targets` is
-        within tolerance or `timeout` seconds elapses.
+        def _on_success(response):
+            result[0] = response
+            done.set()
 
-        Returns True if all targets were reached, False if timed out.
-        """
-        if self._ros is None:
-            # Log-only mode: simulate settling time proportional to timeout.
-            time.sleep(min(timeout * 0.25, 2.0))
-            return True
-        if not self.connected:
-            log.warning("RosBridge not connected — cannot wait for joint state.")
-            return False
+        def _on_error(err):
+            error[0] = err
+            done.set()
 
-        reached  = [False]
-        done_evt = threading.Event()
+        service = self._rp.Service(self._ros, name, srv_type)
+        service.call(self._rp.ServiceRequest(request_dict), _on_success, _on_error)
 
-        def _on_state(msg: dict) -> None:
-            if done_evt.is_set():
-                return
-            names     = msg.get("name", [])
-            positions = msg.get("position", [])
-            state     = dict(zip(names, positions))
-            for jname, jtarget in targets.items():
-                tol = TOL_RAD if jname in (
-                    JOINT_WRIST_YAW, JOINT_GRIP_L, JOINT_GRIP_R
-                ) else TOL_M
-                if abs(state.get(jname, float("inf")) - jtarget) > tol:
-                    return   # at least one joint still off-target
-            reached[0] = True
-            done_evt.set()
+        if not done.wait(timeout=SERVICE_TIMEOUT):
+            log.warning("Service call timed out after %.0fs: %s", SERVICE_TIMEOUT, name)
+            return None
 
-        sub = self._rp.Topic(self._ros, STATE_TOPIC, "sensor_msgs/JointState")
-        sub.subscribe(_on_state)
-        done_evt.wait(timeout=timeout)
-        sub.unsubscribe()
+        if error[0] is not None:
+            log.error("Service error (%s): %s", name, error[0])
+            return None
 
-        if not reached[0]:
-            log.warning("Joint targets not reached in %.1fs — proceeding.", timeout)
-        return reached[0]
+        return result[0]
 
     def subscribe_board_state(self, callback) -> None:
         """
-        Subscribe to BOARD_STATE_TOPIC (published by aruco_node.py on the robot).
-        `callback` receives a dict {piece_id: square_label} on each camera update.
+        Subscribe to BOARD_STATE_TOPIC.
+        `callback` receives a dict {piece_id: square_label} on each update.
         """
         if self._ros is None:
             return
@@ -254,54 +169,21 @@ class _RosBridge:
 
 
 # ---------------------------------------------------------------------------
-# Kinematics helpers
-# ---------------------------------------------------------------------------
-
-def _square_to_joints(square: str, lift: float) -> dict[str, float]:
-    """
-    Convert a chess square name (e.g. 'e4') to Stretch joint targets.
-    Uses the alongside-the-board kinematic model (see module docstring).
-    """
-    file_idx = ord(square[0].lower()) - ord("a")   # 0 = file a, 7 = file h
-    rank_idx = int(square[1]) - 1                   # 0 = rank 1, 7 = rank 8
-    return {
-        JOINT_LIFT:      lift,
-        JOINT_ARM:       ARM_FILE_A + file_idx * SQUARE_M,
-        JOINT_WRIST_YAW: WRIST_RANK1 + rank_idx * WRIST_PER_RANK,
-    }
-
-
-def _graveyard_joints(slot: int, lift: float) -> dict[str, float]:
-    """
-    Return joint targets for the `slot`-th graveyard position.
-    Slots fill left-to-right in the first row, then continue in a second row.
-    """
-    col = slot % 8
-    row = slot // 8
-    return {
-        JOINT_LIFT:      lift,
-        JOINT_ARM:       GRAVE_ARM_BASE   + col * GRAVE_SLOT_STEP,
-        JOINT_WRIST_YAW: GRAVE_WRIST_BASE + row * GRAVE_SLOT_STEP,
-    }
-
-
-# ---------------------------------------------------------------------------
-# RobotController — public API
+# RobotController — public API used by main.py
 # ---------------------------------------------------------------------------
 
 class RobotController:
     """
-    High-level chess move executor for the Hello Robot Stretch.
+    Translates chess move events into /chess/move and /chess/take service
+    calls on the robot, routed through the rosbridge WebSocket.
 
-    execute_move() is an async coroutine that runs the full physical move
-    sequence in a background thread so it never blocks the asyncio event loop.
-    The is_busy property lets callers gate concurrent move attempts.
+    chess_driver.py on the robot owns all kinematic logic; this class only
+    decides which services to call and in what order.
     """
 
     def __init__(self) -> None:
-        self._bridge              = _RosBridge()
-        self._busy                = False
-        self._graveyard_slot      = 0
+        self._bridge = _RosBridge()
+        self._busy   = False
         self._latest_board_state: dict[int, str] = {}
         self._bridge.subscribe_board_state(self._on_board_state)
 
@@ -314,11 +196,22 @@ class RobotController:
         return self._busy
 
     def get_board_state(self) -> dict[int, str]:
-        """Return the latest piece→square mapping received from aruco_node."""
+        """Return the latest piece→square mapping received from the robot camera."""
         return dict(self._latest_board_state)
 
     def _on_board_state(self, pieces: dict[int, str]) -> None:
         self._latest_board_state = pieces
+
+    def _piece_name_at(self, square: str) -> str:
+        """
+        Return the ArUco marker name of the piece currently at `square`,
+        e.g. 'WhitePawn3'.  Falls back to 'unknown' if the camera hasn't
+        seen a piece there or the board state hasn't been received yet.
+        """
+        for marker_id, sq in self._latest_board_state.items():
+            if sq == square:
+                return MARKER_NAMES.get(marker_id, "unknown")
+        return "unknown"
 
     async def execute_move(
         self,
@@ -330,39 +223,40 @@ class RobotController:
         promo_marker_id: int | None = None,
     ) -> None:
         """
-        Orchestrate the full physical move sequence without blocking the
-        asyncio event loop.  A concurrent call while busy is silently dropped.
+        Orchestrate the physical move sequence without blocking the asyncio
+        event loop.  A concurrent call while busy is silently dropped.
 
         Args:
-            from_square:     UCI origin square.
-            to_square:       UCI destination square.
-            is_capture:      True for normal captures and en passant.
-            castling_rook:   (rook_from, rook_to) for castling moves, else None.
-            ep_capture_sq:   Square of the pawn removed by en passant, else None.
-            promo_marker_id: 49 (WhitePromo) or 50 (BlackPromo) for pawn promotions.
+            from_square:   UCI origin square  (e.g. 'e2').
+            to_square:     UCI destination square (e.g. 'e4').
+            is_capture:    True for captures and en passant.
+            castling_rook: (rook_from, rook_to) for castling, else None.
+            ep_capture_sq: Square of the pawn removed by en passant, else None.
+            promo_marker_id: Ignored — chess_driver handles promotions as a
+                             regular move; piece swap is done manually.
         """
         if self._busy:
             log.warning("Robot busy — dropping move %s → %s", from_square, to_square)
             return
         self._busy = True
-        log.info("Robot executing: %s → %s  (capture=%s castle=%s ep=%s promo=%s)",
-                 from_square, to_square, is_capture,
-                 castling_rook, ep_capture_sq, promo_marker_id)
+        log.info(
+            "Robot executing: %s → %s  (capture=%s castle=%s ep=%s)",
+            from_square, to_square, is_capture, castling_rook, ep_capture_sq,
+        )
         try:
             await asyncio.to_thread(
                 self._execute_sync,
                 from_square, to_square, is_capture,
-                castling_rook, ep_capture_sq, promo_marker_id,
+                castling_rook, ep_capture_sq,
             )
         except Exception:
-            log.exception("Unhandled error during move %s → %s",
-                          from_square, to_square)
+            log.exception("Unhandled error during move %s → %s", from_square, to_square)
         finally:
             self._busy = False
             log.info("Robot idle after: %s → %s", from_square, to_square)
 
     # ------------------------------------------------------------------
-    # Synchronous move sequence (runs in asyncio.to_thread worker)
+    # Synchronous sequence (runs inside asyncio.to_thread)
     # ------------------------------------------------------------------
 
     def _execute_sync(
@@ -372,104 +266,69 @@ class RobotController:
         is_capture: bool,
         castling_rook: tuple[str, str] | None,
         ep_capture_sq: str | None,
-        promo_marker_id: int | None,
     ) -> None:
-        # 1. Remove captured piece.  For en passant the captured pawn is on a
-        #    different square than the destination.
+        # 1. Remove the captured piece before moving the capturing piece.
+        #    For en passant the captured pawn is on a different square.
         if is_capture:
-            self._capture(ep_capture_sq if ep_capture_sq else to_square)
+            capture_sq = ep_capture_sq if ep_capture_sq else to_square
+            self._take(capture_sq)
 
-        # 2. Move the main piece.
-        if promo_marker_id is not None:
-            # Promotion: pawn goes to graveyard, promoted piece comes from promo area.
-            self._pick(from_square)
-            self._deposit_to_graveyard()
-            self._pick_from_promo(promo_marker_id)
-            self._place(to_square)
-        else:
-            self._pick(from_square)
-            self._place(to_square)
+        # 2. Move the main piece from its source to its destination.
+        self._move(from_square, to_square)
 
-        # 3. Castling: also move the rook after the king is placed.
+        # 3. For castling, also move the rook after the king is placed.
         if castling_rook is not None:
             rook_from, rook_to = castling_rook
-            self._pick(rook_from)
-            self._place(rook_to)
-
-        # 4. Post-move verification via camera (non-blocking if camera offline).
-        if self._latest_board_state:
-            self._verify_placement(to_square)
-
-    def _capture(self, square: str) -> None:
-        """Pick up the piece at `square` and deposit it in the graveyard."""
-        log.info("  [CAPTURE] clearing %s", square.upper())
-        self._pick(square)
-        self._deposit_to_graveyard()
-
-    def _deposit_to_graveyard(self) -> None:
-        """Deposit whatever is currently in the gripper to the next graveyard slot."""
-        grave_transit = _graveyard_joints(self._graveyard_slot, LIFT_TRAVEL)
-        grave_drop    = _graveyard_joints(self._graveyard_slot, GRAVE_LIFT_DROP)
-        self._move_arm(grave_transit)
-        self._move_arm(grave_drop)
-        self._set_gripper(GRIP_OPEN)
-        self._move_arm(grave_transit)
-        self._graveyard_slot += 1
-
-    def _pick_from_promo(self, promo_marker_id: int) -> None:
-        """Travel to the promotion staging area and pick up the waiting piece."""
-        promo = dict(PROMO_JOINTS[promo_marker_id])
-        promo_pick = {**promo, JOINT_LIFT: LIFT_PICK}
-        self._move_arm(promo)
-        self._move_arm(promo_pick)
-        self._set_gripper(GRIP_CLOSED)
-        self._move_arm(promo)
-
-    def _verify_placement(self, square: str) -> bool:
-        """
-        Wait up to VERIFY_TIMEOUT seconds for any piece to appear at `square`
-        in the camera board state.  Returns True if confirmed, False if timeout.
-        """
-        deadline = time.monotonic() + VERIFY_TIMEOUT
-        while time.monotonic() < deadline:
-            if square in self._latest_board_state.values():
-                log.debug("Verification OK: piece detected at %s", square.upper())
-                return True
-            time.sleep(0.3)
-        log.warning("Post-move verification: no piece seen at %s — check accuracy.",
-                    square.upper())
-        return False
-
-    def _pick(self, square: str) -> None:
-        """Traverse to `square`, lower, and grip the piece."""
-        log.info("  [PICK]    %s", square.upper())
-        self._move_arm(_square_to_joints(square, LIFT_TRAVEL))
-        self._move_arm(_square_to_joints(square, LIFT_PICK))
-        self._set_gripper(GRIP_CLOSED)
-        self._move_arm(_square_to_joints(square, LIFT_TRAVEL))
-
-    def _place(self, square: str) -> None:
-        """Carry the held piece to `square`, lower, and release."""
-        log.info("  [PLACE]   %s", square.upper())
-        self._move_arm(_square_to_joints(square, LIFT_TRAVEL))
-        self._move_arm(_square_to_joints(square, LIFT_PLACE))
-        self._set_gripper(GRIP_OPEN)
-        self._move_arm(_square_to_joints(square, LIFT_TRAVEL))
+            self._move(rook_from, rook_to)
 
     # ------------------------------------------------------------------
-    # Primitive hardware commands
+    # Service call helpers
     # ------------------------------------------------------------------
 
-    def _move_arm(self, joints: dict[str, float]) -> None:
-        """
-        Send a JointTrajectory to the Stretch controller and wait for the
-        arm to settle at the target positions before returning.
-        """
-        self._bridge.publish_trajectory(joints, duration_sec=WAIT_ARM)
-        self._bridge.wait_for_joints(joints, timeout=WAIT_ARM)
+    def _move(self, from_sq: str, to_sq: str) -> bool:
+        """Call /chess/move to pick up the piece at from_sq and place it at to_sq."""
+        from_file, from_rank = _parse_square(from_sq)
+        to_file,   to_rank   = _parse_square(to_sq)
+        piece = self._piece_name_at(from_sq)
+        log.info("  [MOVE] %s → %s  (piece=%s)", from_sq.upper(), to_sq.upper(), piece)
+        response = self._bridge.call_service(
+            SERVICE_MOVE,
+            SERVICE_TYPE_MOVE,
+            {
+                "start_file": from_file,
+                "start_rank": from_rank,
+                "end_file":   to_file,
+                "end_rank":   to_rank,
+                "piece":      piece,
+            },
+        )
+        ok = bool(response and response.get("success", False))
+        if not ok:
+            log.error("  [MOVE] failed: %s", response)
+        else:
+            log.info("  [MOVE] OK — %s", response.get("message", ""))
+        return ok
 
-    def _set_gripper(self, position: float) -> None:
-        """Set both gripper fingers to `position` (radians) and wait."""
-        joints = {JOINT_GRIP_L: position, JOINT_GRIP_R: position}
-        self._bridge.publish_trajectory(joints, duration_sec=WAIT_GRIP)
-        self._bridge.wait_for_joints(joints, timeout=WAIT_GRIP)
+    def _take(self, square: str) -> bool:
+        """Call /chess/take to pick up and discard the piece at square."""
+        file, rank = _parse_square(square)
+        piece = self._piece_name_at(square)
+        log.info("  [TAKE] clearing %s  (piece=%s)", square.upper(), piece)
+        # chess_driver's take_callback reads end_file / end_rank for the target square.
+        response = self._bridge.call_service(
+            SERVICE_TAKE,
+            SERVICE_TYPE_MOVE,
+            {
+                "start_file": file,
+                "start_rank": rank,
+                "end_file":   file,
+                "end_rank":   rank,
+                "piece":      piece,
+            },
+        )
+        ok = bool(response and response.get("success", False))
+        if not ok:
+            log.error("  [TAKE] failed: %s", response)
+        else:
+            log.info("  [TAKE] OK — %s", response.get("message", ""))
+        return ok

@@ -341,6 +341,70 @@
     .transcript-box .error-text  { color: var(--highlight); }
 
     /* ------------------------------------------------------------------ */
+    /* Player Robot / Human Controls                                      */
+    /* ------------------------------------------------------------------ */
+    .player-controls {
+      display: flex;
+      gap: 12px;
+      width: 100%;
+      max-width: 380px;
+    }
+
+    .player-ctrl {
+      flex: 1;
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .player-ctrl-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .ctrl-toggle {
+      display: flex;
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+      padding: 3px;
+      gap: 3px;
+    }
+
+    .ctrl-btn {
+      flex: 1;
+      padding: 7px 6px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      background: transparent;
+      color: var(--text-muted);
+      transition: background 0.2s, color 0.2s;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .ctrl-btn.active[data-type="human"] {
+      background: var(--accent);
+      color: var(--text-primary);
+    }
+
+    .ctrl-btn.active[data-type="robot"] {
+      background: var(--highlight);
+      color: #fff;
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Select Panel hint                                                   */
     /* ------------------------------------------------------------------ */
     .select-hint {
@@ -520,6 +584,26 @@
     @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ------------------------------------------------------------------ */
+    /* Piece Identity Labels                                               */
+    /* ------------------------------------------------------------------ */
+    .piece-label {
+      position: absolute;
+      bottom: 3px;
+      right: 3px;
+      font-size: 0.52rem;
+      font-weight: 800;
+      color: rgba(255, 255, 255, 0.95);
+      text-shadow:
+        0 0 3px rgba(0,0,0,1),
+        0 0 6px rgba(0,0,0,0.8),
+        1px 1px 0 rgba(0,0,0,0.9);
+      pointer-events: none;
+      z-index: 10;
+      line-height: 1;
+      letter-spacing: 0.01em;
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Game-Over Banner                                                    */
     /* ------------------------------------------------------------------ */
     #gameOverBanner {
@@ -586,11 +670,38 @@
     </button>
   </div>
 
+  <!-- Per-player robot / human toggle -->
+  <div class="player-controls">
+    <div class="player-ctrl">
+      <div class="player-ctrl-label">
+        <div class="turn-swatch"></div> White
+      </div>
+      <div class="ctrl-toggle">
+        <button class="ctrl-btn active" data-color="w" data-type="human">Human</button>
+        <button class="ctrl-btn"        data-color="w" data-type="robot">Robot</button>
+      </div>
+    </div>
+    <div class="player-ctrl">
+      <div class="player-ctrl-label">
+        <div class="turn-swatch black"></div> Black
+      </div>
+      <div class="ctrl-toggle">
+        <button class="ctrl-btn active" data-color="b" data-type="human">Human</button>
+        <button class="ctrl-btn"        data-color="b" data-type="robot">Robot</button>
+      </div>
+    </div>
+  </div>
+
   <div class="board-card">
 
     <div class="board-wrapper">
       <div id="board"></div>
       <div id="boardOverlay" class="board-overlay">Robot is moving...</div>
+    </div>
+
+    <div id="robotBusyOverlay" style="display:none">
+      <div class="spinner"></div>
+      <p>Robot is moving…</p>
     </div>
 
     <div class="select-hint" id="selectHint">Tap or drag a piece to select it.</div>
@@ -599,9 +710,9 @@
       <button class="mic-btn" id="micBtn" aria-label="Hold to speak your move">
         &#127908;
       </button>
-      <span class="mic-label" id="micLabel">TAP TO SPEAK</span>
+      <span class="mic-label" id="micLabel">TAP TO RECORD</span>
       <div class="transcript-box" id="transcriptBox">
-        <span class="hint-text">Say a move like &ldquo;e2 to e4&rdquo; or &ldquo;knight to f3&rdquo;</span>
+        <span class="hint-text">Say &ldquo;e2 to e4&rdquo;</span>
       </div>
     </div>
 
@@ -626,6 +737,20 @@
 
 </div>
 
+<!-- Promotion picker modal -->
+<div id="promoModal" style="display:none">
+  <div id="promoBackdrop"></div>
+  <div id="promoDialog">
+    <p>Promote pawn to…</p>
+    <div id="promoChoices">
+      <button class="promo-btn" data-piece="q">♛ Queen</button>
+      <button class="promo-btn" data-piece="r">♜ Rook</button>
+      <button class="promo-btn" data-piece="b">♝ Bishop</button>
+      <button class="promo-btn" data-piece="n">♞ Knight</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://code.jquery.com/jquery-3.7.1.min.js" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"
         crossorigin="anonymous"></script>
@@ -641,6 +766,20 @@
   let currentMode = 'select'; // 'select' | 'voice'
   let selectedSquare = null;
   let moveNumber = 1;
+
+  // Tracks whether each player's moves should be physically executed by the robot.
+  // false = human only (digital board updates, robot stays still)
+  // true  = robot executes the move on the physical board
+  const robotPlayers = { w: false, b: false };
+
+  $('.ctrl-btn').on('click', function () {
+    const color = $(this).data('color');
+    const type  = $(this).data('type');
+    robotPlayers[color] = (type === 'robot');
+    // Update active highlight within this player's toggle group
+    $(`.ctrl-btn[data-color="${color}"]`).removeClass('active');
+    $(this).addClass('active');
+  });
 
   // =========================================================================
   // WebSocket
@@ -684,8 +823,9 @@
 
       if (msg.fen) {
         board.position(msg.fen, false); // false = instant snap to new FEN
-        chess.load(msg.fen);   
+        chess.load(msg.fen);
         updateTurnDisplay(msg.fen);
+        updatePieceLabels();  // re-render labels after chessboard.js repaints
       }
 
       if (msg.event === 'invalid') {
@@ -699,6 +839,8 @@
         moveNumber = 1;
         clearSelection();
         hideGameOver();
+        resetPieceIdentity();
+        updatePieceLabels();
         logEvent('Game reset.');
       } else if (msg.event === 'sync') {
         logEvent('Board synchronised.');
@@ -715,11 +857,126 @@
     });
   }
 
+  // =========================================================================
+  // Piece Identity Tracking
+  // Keeps a live map of square → full ArUco marker name (e.g. 'WhitePawn3')
+  // so we can send the exact piece name to the robot service.
+  // Pieces are numbered left-to-right (a-file = 1, h-file = 8 for pawns;
+  // a-file = 1, h-file = 2 for symmetric pieces like rooks/knights/bishops).
+  // =========================================================================
+  const INITIAL_PIECE_IDENTITY = {
+    // White back rank (a1→h1)
+    a1: 'WhiteRook1',   b1: 'WhiteKnight1', c1: 'WhiteBishop1', d1: 'WhiteQueen1',
+    e1: 'WhiteKing1',   f1: 'WhiteBishop2', g1: 'WhiteKnight2', h1: 'WhiteRook2',
+    // White pawns (a2→h2)
+    a2: 'WhitePawn1',   b2: 'WhitePawn2',   c2: 'WhitePawn3',   d2: 'WhitePawn4',
+    e2: 'WhitePawn5',   f2: 'WhitePawn6',   g2: 'WhitePawn7',   h2: 'WhitePawn8',
+    // Black pawns (a7→h7)
+    a7: 'BlackPawn1',   b7: 'BlackPawn2',   c7: 'BlackPawn3',   d7: 'BlackPawn4',
+    e7: 'BlackPawn5',   f7: 'BlackPawn6',   g7: 'BlackPawn7',   h7: 'BlackPawn8',
+    // Black back rank (a8→h8)
+    a8: 'BlackRook1',   b8: 'BlackKnight1', c8: 'BlackBishop1', d8: 'BlackQueen1',
+    e8: 'BlackKing1',   f8: 'BlackBishop2', g8: 'BlackKnight2', h8: 'BlackRook2',
+  };
+
+  let pieceIdentity = {};
+
+  function resetPieceIdentity() {
+    pieceIdentity = Object.assign({}, INITIAL_PIECE_IDENTITY);
+  }
+
+  // Shorten full marker name to a compact label for display on the board.
+  // e.g. 'WhitePawn3' → 'P3', 'BlackKnight1' → 'N1', 'WhiteKing1' → 'K1'
+  function getPieceShortLabel(name) {
+    const m = name.match(/(Pawn|Knight|Bishop|Rook|Queen|King)(\d+)/);
+    if (!m) return name;
+    const t = { Pawn: 'P', Knight: 'N', Bishop: 'B', Rook: 'R', Queen: 'Q', King: 'K' };
+    return (t[m[1]] || '?') + m[2];
+  }
+
+  // Render small labels on every occupied square according to pieceIdentity.
+  // Must be called after every board.position() call (chessboard.js rebuilds
+  // the inner HTML of squares, removing previously injected elements).
+  function updatePieceLabels() {
+    $('.piece-label').remove();
+    for (const [sq, name] of Object.entries(pieceIdentity)) {
+      const label = getPieceShortLabel(name);
+      if (!label) continue;
+      $(`[data-square="${sq}"]`).append(
+        `<div class="piece-label">${label}</div>`
+      );
+    }
+  }
+
+  // Update pieceIdentity for a move BEFORE chess.js pushes it, so we still
+  // have access to the pre-move board state via chess.moves().
+  function updatePieceIdentityOnMove(from, to, promotion) {
+    const moves = chess.moves({ verbose: true });
+    const moveObj = moves.find(m =>
+      m.from === from && m.to === to && (!promotion || m.promotion === promotion)
+    );
+
+    if (!moveObj) {
+      // Fallback: just relocate the piece
+      if (pieceIdentity[from]) {
+        pieceIdentity[to] = pieceIdentity[from];
+        delete pieceIdentity[from];
+      }
+      return;
+    }
+
+    // Remove captured piece from identity map
+    if (moveObj.captured) {
+      if (moveObj.flags.includes('e')) {
+        // En passant: the captured pawn sits on the ep square (same file as
+        // destination, same rank as origin)
+        const epSq = to[0] + from[1];
+        delete pieceIdentity[epSq];
+      } else {
+        delete pieceIdentity[to];  // normal capture
+      }
+    }
+
+    // Relocate the moving piece
+    if (pieceIdentity[from]) {
+      pieceIdentity[to] = pieceIdentity[from];
+      delete pieceIdentity[from];
+    }
+
+    // For castling, also relocate the rook
+    if (moveObj.flags.includes('k')) {
+      const rank = from[1];
+      if (pieceIdentity['h' + rank]) {
+        pieceIdentity['f' + rank] = pieceIdentity['h' + rank];
+        delete pieceIdentity['h' + rank];
+      }
+    } else if (moveObj.flags.includes('q')) {
+      const rank = from[1];
+      if (pieceIdentity['a' + rank]) {
+        pieceIdentity['d' + rank] = pieceIdentity['a' + rank];
+        delete pieceIdentity['a' + rank];
+      }
+    }
+  }
+
   function sendMove(from, to, promotion) {
     if (socket && socket.readyState === WebSocket.OPEN) {
-      isBoardLocked = true; // Lock the board!
-      $('#boardOverlay').addClass('active'); // Turn on overlay
-      socket.send(JSON.stringify({ from, to }));
+      // chess.turn() is still the moving player's colour at this point
+      // (local state only updates when server echoes back a FEN).
+      const isRobotMove = robotPlayers[chess.turn()];
+
+      // Capture the piece name BEFORE updating the identity map.
+      const pieceName = pieceIdentity[from] || '';
+
+      // Update piece identity tracking and refresh board labels.
+      updatePieceIdentityOnMove(from, to, promotion);
+      updatePieceLabels();
+
+      isBoardLocked = true;
+      $('#boardOverlay').addClass('active');
+      const msg = { from, to, robot: isRobotMove, piece: pieceName };
+      if (promotion) msg.promotion = promotion;
+      socket.send(JSON.stringify(msg));
     }
   }
 
@@ -781,7 +1038,7 @@
   // =========================================================================
   const SUBTITLES = {
     select: 'Tap or drag a piece to move.',
-    voice:  'Use voice commands to make your move.',
+    voice:  'Tap mic → say "e2 to e4" → tap to stop.',
   };
 
   function switchMode(mode) {
@@ -791,17 +1048,17 @@
     $(`.mode-btn[data-mode="${mode}"]`).addClass('active');
 
     if (mode === 'voice') {
-      $('#voicePanel').show();
+      $('#voicePanel').removeAttr('hidden');
       $('#selectHint').hide();
+      // Don't auto-start — user must tap the mic to begin recording
     } else {
-      $('#voicePanel').hide();
+      $('#voicePanel').attr('hidden', '');
       $('#selectHint').show();
+      stopListening();    // abort any in-progress recording when leaving voice mode
     }
 
     $('#modeSubtitle').text(SUBTITLES[mode]);
-
     clearSelection();
-    stopListening();
   }
 
   $('.mode-btn').on('click', function () {
@@ -869,68 +1126,18 @@
   }
 
   // =========================================================================
-  // VOICE COMMAND MODE
+  // VOICE COMMAND MODE  (faster-whisper via POST /transcribe)
   // =========================================================================
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let recognizer  = null;
-  let listening   = false;
+  let mediaRecorder = null;
+  let audioChunks   = [];
+  let listening     = false;
 
-  if (SpeechRecognition) {
-    recognizer = new SpeechRecognition();
-    recognizer.lang        = 'en-US';
-    recognizer.interimResults = true;
-    recognizer.continuous  = false;
-    recognizer.maxAlternatives = 3;
-
-    recognizer.addEventListener('result', (evt) => {
-      const results = evt.results[evt.results.length - 1];
-      const interim = results[0].transcript;
-
-      if (!results.isFinal) {
-        setVoiceResult(`"${interim}"`, 'heard');
-        return;
-      }
-
-      let parsed = null;
-      for (let i = 0; i < results.length; i++) {
-        parsed = parseVoiceMove(results[i].transcript);
-        if (parsed) break;
-      }
-
-      if (parsed) {
-        setVoiceResult(`Heard: "${interim}" → ${parsed.from.toUpperCase()}${parsed.to.toUpperCase()}`, 'parsed');
-        if (isPromotion(parsed.from, parsed.to)) {
-          requestPromotion(parsed.from, parsed.to);
-        } else {
-          sendMove(parsed.from, parsed.to);
-        }
-      } else {
-        setVoiceResult(`Couldn't parse "${interim}". Try "e2 to e4".`, 'error');
-      }
-    });
-
-    recognizer.addEventListener('end', () => {
-      listening = false;
-      updateMicUI();
-    });
-
-    recognizer.addEventListener('error', (evt) => {
-      listening = false;
-      updateMicUI();
-      const msg = evt.error === 'not-allowed'
-        ? 'Microphone access denied. Check browser permissions.'
-        : `Speech error: ${evt.error}`;
-      setVoiceResult(msg, 'error');
-    });
-  }
-
+  // Tap mic to START recording.  Tap again to STOP — audio is POSTed to
+  // /transcribe, whisper transcribes it, and the result is checked for the
+  // wake phrase "Robochess move <from> <to>".
   $('#micBtn').on('click', () => {
-    if (!SpeechRecognition) {
-      setVoiceResult('Speech recognition is not supported in this browser.', 'error');
-      return;
-    }
     if (isBoardLocked) {
-      setVoiceResult('Waiting for server...', 'hint');
+      setVoiceResult('Waiting for robot to finish…', 'error');
       return;
     }
     if (listening) {
@@ -940,24 +1147,94 @@
     }
   });
 
-  function startListening() {
-    if (!recognizer || listening) return;
+  async function startListening() {
+    if (listening) return;
+    let stream;
     try {
-      recognizer.start();
-      listening = true;
-      updateMicUI();
-      setVoiceResult('<span class="hint-text">Listening…</span>');
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
-      setVoiceResult('Could not start microphone.', 'error');
+      setVoiceResult('Microphone access denied. Check browser permissions.', 'error');
+      console.error('[Voice] getUserMedia error:', e);
+      return;
     }
+
+    audioChunks   = [];
+    mediaRecorder = new MediaRecorder(stream);
+
+    mediaRecorder.ondataavailable = (evt) => {
+      if (evt.data && evt.data.size > 0) audioChunks.push(evt.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      // Release the microphone immediately after recording stops.
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(audioChunks, { type: 'audio/webm' });
+      console.log('[Voice] recording stopped — blob size:', blob.size, 'bytes');
+      await transcribeAndProcess(blob);
+    };
+
+    mediaRecorder.start();
+    listening = true;
+    updateMicUI();
+    setVoiceResult('<span class="hint-text">Recording… tap to stop</span>');
+    console.log('[Voice] recording started');
   }
 
   function stopListening() {
-    if (recognizer && listening) {
-      recognizer.stop();
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      mediaRecorder.stop();   // triggers onstop → transcribeAndProcess
     }
     listening = false;
     updateMicUI();
+  }
+
+  async function transcribeAndProcess(blob) {
+    setVoiceResult('<span class="hint-text">Transcribing…</span>');
+
+    const formData = new FormData();
+    formData.append('file', blob, 'audio.webm');
+
+    let transcript = '';
+    try {
+      const res  = await fetch('/transcribe', { method: 'POST', body: formData });
+      const data = await res.json();
+      transcript = (data.text || '').trim();
+      console.log('[Voice] raw transcript:', JSON.stringify(transcript));
+      if (data.error) console.warn('[Voice] server error:', data.error);
+    } catch (e) {
+      setVoiceResult('Transcription request failed.', 'error');
+      console.error('[Voice] fetch error:', e);
+      return;
+    }
+
+    if (!transcript) {
+      setVoiceResult('<span class="hint-text">Nothing heard — try again</span>');
+      return;
+    }
+
+    // Show the full raw transcript so the user can see exactly what was heard.
+    console.log('[Voice] transcript received:', JSON.stringify(transcript));
+    setVoiceResult(`<span class="heard-text">"${escHtml(transcript)}"</span>`);
+
+    // Try to parse a chess move directly from whatever was said.
+    const parsed = parseVoiceMove(transcript);
+    if (parsed) {
+      console.log('[Voice] parsed move:', parsed.from, '→', parsed.to);
+      setVoiceResult(
+        `<span class="parsed-move">Moving: ${parsed.from.toUpperCase()} → ${parsed.to.toUpperCase()}</span>`
+      );
+      if (isPromotion(parsed.from, parsed.to)) {
+        requestPromotion(parsed.from, parsed.to);
+      } else {
+        sendMove(parsed.from, parsed.to);
+      }
+    } else {
+      console.log('[Voice] could not parse a move from:', transcript);
+      setVoiceResult(
+        `<span class="heard-text">"${escHtml(transcript)}"</span>` +
+        `<br><span class="error-text">Couldn't find a move — try &ldquo;e2 to e4&rdquo;</span>`
+      );
+    }
   }
 
   function updateMicUI() {
@@ -966,9 +1243,9 @@
     $btn.removeClass('listening processing');
     if (listening) {
       $btn.addClass('listening');
-      $lbl.text('TAP TO STOP');
+      $lbl.text('RECORDING — TAP TO STOP');
     } else {
-      $lbl.text('TAP TO SPEAK');
+      $lbl.text('TAP TO RECORD');
     }
   }
 
@@ -982,6 +1259,63 @@
     $('#transcriptBox').html(html);
   }
 
+  // Maps spoken piece names (including common mishearings) to chess.js letters.
+  const PIECE_WORDS = {
+    'king': 'k', 'queen': 'q', 'rook': 'r',
+    'bishop': 'b', 'knight': 'n', 'night': 'n', 'pawn': 'p',
+  };
+
+  // Resolve a SAN string like 'O-O' into a {from, to} pair using the live board.
+  function resolveSAN(san) {
+    const moves = chess.moves({ verbose: true });
+    const m = moves.find(mv => mv.san === san || mv.san.replace(/[+#]/g, '') === san);
+    return m ? { from: m.from, to: m.to } : null;
+  }
+
+  // Find which legal move involves pieceLetter landing on dest.
+  function resolveByPiece(pieceLetter, dest) {
+    const moves = chess.moves({ verbose: true });
+    const m = moves.find(mv => mv.piece === pieceLetter && mv.to === dest);
+    return m ? { from: m.from, to: m.to } : null;
+  }
+
+  // True if any legal move from→to is a pawn promotion.
+  function isPromotion(from, to) {
+    return chess.moves({ verbose: true })
+      .some(m => m.from === from && m.to === to && m.promotion);
+  }
+
+  // Show the promotion-piece picker dialog then send the move.
+  function requestPromotion(from, to) {
+    $('#promoModal').show();
+    $('#promoChoices .promo-btn').off('click').on('click', function () {
+      $('#promoModal').hide();
+      sendMove(from, to, $(this).data('piece'));
+    });
+  }
+
+  // Extract chess squares from a transcript, handling Whisper quirks:
+  //   "b1 to b3"  → strict word-boundary match works fine
+  //   "b1b3"      → squares jammed together with no separator
+  //   "b12b3"     → extra digit inserted (Whisper hears "to" as "2" or "12")
+  function extractSquares(text) {
+    // 1. Strict pass — word boundaries (covers normal speech and "e2 e4")
+    const strict = text.match(/\b[a-h][1-8]\b/g);
+    if (strict && strict.length >= 2) return strict;
+
+    // 2. Loose pass — match [a-h] followed by one or more digits and keep
+    //    only the first digit as the rank.  This handles concatenated squares
+    //    ("b1b3" → b1, b3) and extra digits ("b12b3" → b1, b3).
+    const loose = [];
+    const re = /[a-h]\d+/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const rank = m[0][1]; // first digit after the file letter
+      if (rank >= '1' && rank <= '8') loose.push(m[0][0] + rank);
+    }
+    return loose.length >= 2 ? loose : null;
+  }
+
   function parseVoiceMove(text) {
     text = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').trim();
 
@@ -991,8 +1325,8 @@
     if (isQueenside) return resolveSAN('O-O-O');
     if (isKingside)  return resolveSAN('O-O');
 
-    // Two explicit squares: "e2 to e4", "e2e4", "a1 b3"
-    const squares = text.match(/\b[a-h][1-8]\b/g);
+    // Two explicit squares — strict first, loose fallback for Whisper quirks
+    const squares = extractSquares(text);
     if (squares && squares.length >= 2) {
       return { from: squares[0], to: squares[1] };
     }
@@ -1000,8 +1334,8 @@
     // Piece name + destination: "knight to f3", "bishop takes e5"
     for (const [word, letter] of Object.entries(PIECE_WORDS)) {
       if (text.includes(word)) {
-        const destMatch = text.match(/\b([a-h][1-8])\b/);
-        if (destMatch) return resolveByPiece(letter, destMatch[1]);
+        const dest = extractSquares(text);
+        if (dest) return resolveByPiece(letter, dest[0]);
         break;
       }
     }
@@ -1049,7 +1383,12 @@
     fetch('/reset', { method: 'POST' })
       .then(r => r.json())
       .then(data => {
-        if (data.fen) { board.position(data.fen, false); updateTurnDisplay(data.fen); }
+        if (data.fen) {
+          board.position(data.fen, false);
+          updateTurnDisplay(data.fen);
+          resetPieceIdentity();
+          updatePieceLabels();
+        }
       })
       .catch(() => logEvent('Reset request failed.'));
   });
@@ -1057,8 +1396,10 @@
   // =========================================================================
   // Boot
   // =========================================================================
+  resetPieceIdentity();
   connect();
   switchMode('select');
+  updatePieceLabels();
 
 })();
 </script>
