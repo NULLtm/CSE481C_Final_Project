@@ -267,20 +267,21 @@ class ChessDriver(Node):
         if self.move_to_square(request.end_file, request.end_rank, response=response) is False:
             return response
 
-        if self.grab(response, request.end_piece) is False:
-            return response
-        
-        if self.gripper_discard_position(response=response) is False:
-            return response
-        
-        if self.open_gripper(response) is False:
-            return response
-        
-        if self.gripper_reset_position(response) is False:
+        # grab
+        if self.grab(response) is False:
             return response
 
-        if self.move(response, request.start_file, request.start_rank, request.end_file, request.end_rank, request.start_piece):
-            response.message = f"Successfully moved piece."
+        if self.gripper_discard_position(response=response) is False:
+            return response
+
+        if self.open_gripper(response) is False:
+            return response
+
+        if self.gripper_reset_position(response) is False:
+            return response
+        
+        if self.move_callback(request, response):
+            response.message = "Successfully taken piece!"
             response.success = True
         return response
 
@@ -401,8 +402,8 @@ class ChessDriver(Node):
         # lookup_transform syntax: (target_frame, source_frame, time)
         # Using base_link as target_frame gives us the marker coordinates IN the base_link frame.
         trans_left = self.get_marker_transform('link_aruco_fingertip_left', 'base_link')
-        trans_right = self.get_marker_transform('link_aruco_fingertip_right', 'base_link')
-        trans_target = self.get_marker_transform(piece, 'base_link')
+        trans_right = self.tf_buffer.lookup_transform('link_aruco_fingertip_right', 'base_link')
+        trans_target = self.tf_buffer.lookup_transform('BlackPawn3', 'base_link')
 
         # 2. Calculate the midpoint of the two fingertip markers (we only strictly need X for base translation)
         mid_x = (trans_left.transform.translation.x + trans_right.transform.translation.x) / 2.0

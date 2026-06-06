@@ -196,6 +196,15 @@ class RobotController:
     def is_busy(self) -> bool:
         return self._busy
 
+    def reset(self) -> None:
+        """Send the robot to its stow/home position via the /chess/reset service."""
+        log.info("Stretch reset requested.")
+        self._bridge.call_service(
+            "/chess/reset",
+            "std_srvs/Trigger",
+            {},
+        )
+
     def get_board_state(self) -> dict[int, str]:
         """Return the latest piece→square mapping received from the robot camera."""
         return dict(self._latest_board_state)

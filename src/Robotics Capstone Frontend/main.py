@@ -209,6 +209,13 @@ async def transcribe_audio(file: UploadFile = File(...)):
         os.unlink(tmp_path)
 
 
+@app.post("/reset_stretch")
+async def reset_stretch():
+    """Send the Stretch robot to its home/stow position."""
+    await asyncio.to_thread(robot.reset)
+    return {"status": "ok"}
+
+
 @app.post("/reset")
 async def reset_game():
     """Reset the board to the starting position and notify all clients."""
