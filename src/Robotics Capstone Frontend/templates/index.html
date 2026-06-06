@@ -584,6 +584,26 @@
     @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ------------------------------------------------------------------ */
+    /* Piece Identity Labels                                               */
+    /* ------------------------------------------------------------------ */
+    .piece-label {
+      position: absolute;
+      bottom: 3px;
+      right: 3px;
+      font-size: 0.52rem;
+      font-weight: 800;
+      color: rgba(255, 255, 255, 0.95);
+      text-shadow:
+        0 0 3px rgba(0,0,0,1),
+        0 0 6px rgba(0,0,0,0.8),
+        1px 1px 0 rgba(0,0,0,0.9);
+      pointer-events: none;
+      z-index: 10;
+      line-height: 1;
+      letter-spacing: 0.01em;
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Game-Over Banner                                                    */
     /* ------------------------------------------------------------------ */
     #gameOverBanner {
@@ -803,8 +823,9 @@
 
       if (msg.fen) {
         board.position(msg.fen, false); // false = instant snap to new FEN
-        chess.load(msg.fen);   
+        chess.load(msg.fen);
         updateTurnDisplay(msg.fen);
+        updatePieceLabels();  // re-render labels after chessboard.js repaints
       }
 
       if (msg.event === 'invalid') {
@@ -818,6 +839,8 @@
         moveNumber = 1;
         clearSelection();
         hideGameOver();
+        resetPieceIdentity();
+        updatePieceLabels();
         logEvent('Game reset.');
       } else if (msg.event === 'sync') {
         logEvent('Board synchronised.');
@@ -834,15 +857,124 @@
     });
   }
 
+  // =========================================================================
+  // Piece Identity Tracking
+  // Keeps a live map of square → full ArUco marker name (e.g. 'WhitePawn3')
+  // so we can send the exact piece name to the robot service.
+  // Pieces are numbered left-to-right (a-file = 1, h-file = 8 for pawns;
+  // a-file = 1, h-file = 2 for symmetric pieces like rooks/knights/bishops).
+  // =========================================================================
+  const INITIAL_PIECE_IDENTITY = {
+    // White back rank (a1→h1)
+    a1: 'WhiteRook1',   b1: 'WhiteKnight1', c1: 'WhiteBishop1', d1: 'WhiteQueen1',
+    e1: 'WhiteKing1',   f1: 'WhiteBishop2', g1: 'WhiteKnight2', h1: 'WhiteRook2',
+    // White pawns (a2→h2)
+    a2: 'WhitePawn1',   b2: 'WhitePawn2',   c2: 'WhitePawn3',   d2: 'WhitePawn4',
+    e2: 'WhitePawn5',   f2: 'WhitePawn6',   g2: 'WhitePawn7',   h2: 'WhitePawn8',
+    // Black pawns (a7→h7)
+    a7: 'BlackPawn1',   b7: 'BlackPawn2',   c7: 'BlackPawn3',   d7: 'BlackPawn4',
+    e7: 'BlackPawn5',   f7: 'BlackPawn6',   g7: 'BlackPawn7',   h7: 'BlackPawn8',
+    // Black back rank (a8→h8)
+    a8: 'BlackRook1',   b8: 'BlackKnight1', c8: 'BlackBishop1', d8: 'BlackQueen1',
+    e8: 'BlackKing1',   f8: 'BlackBishop2', g8: 'BlackKnight2', h8: 'BlackRook2',
+  };
+
+  let pieceIdentity = {};
+
+  function resetPieceIdentity() {
+    pieceIdentity = Object.assign({}, INITIAL_PIECE_IDENTITY);
+  }
+
+  // Shorten full marker name to a compact label for display on the board.
+  // e.g. 'WhitePawn3' → 'P3', 'BlackKnight1' → 'N1', 'WhiteKing1' → 'K1'
+  function getPieceShortLabel(name) {
+    const m = name.match(/(Pawn|Knight|Bishop|Rook|Queen|King)(\d+)/);
+    if (!m) return name;
+    const t = { Pawn: 'P', Knight: 'N', Bishop: 'B', Rook: 'R', Queen: 'Q', King: 'K' };
+    return (t[m[1]] || '?') + m[2];
+  }
+
+  // Render small labels on every occupied square according to pieceIdentity.
+  // Must be called after every board.position() call (chessboard.js rebuilds
+  // the inner HTML of squares, removing previously injected elements).
+  function updatePieceLabels() {
+    $('.piece-label').remove();
+    for (const [sq, name] of Object.entries(pieceIdentity)) {
+      const label = getPieceShortLabel(name);
+      if (!label) continue;
+      $(`[data-square="${sq}"]`).append(
+        `<div class="piece-label">${label}</div>`
+      );
+    }
+  }
+
+  // Update pieceIdentity for a move BEFORE chess.js pushes it, so we still
+  // have access to the pre-move board state via chess.moves().
+  function updatePieceIdentityOnMove(from, to, promotion) {
+    const moves = chess.moves({ verbose: true });
+    const moveObj = moves.find(m =>
+      m.from === from && m.to === to && (!promotion || m.promotion === promotion)
+    );
+
+    if (!moveObj) {
+      // Fallback: just relocate the piece
+      if (pieceIdentity[from]) {
+        pieceIdentity[to] = pieceIdentity[from];
+        delete pieceIdentity[from];
+      }
+      return;
+    }
+
+    // Remove captured piece from identity map
+    if (moveObj.captured) {
+      if (moveObj.flags.includes('e')) {
+        // En passant: the captured pawn sits on the ep square (same file as
+        // destination, same rank as origin)
+        const epSq = to[0] + from[1];
+        delete pieceIdentity[epSq];
+      } else {
+        delete pieceIdentity[to];  // normal capture
+      }
+    }
+
+    // Relocate the moving piece
+    if (pieceIdentity[from]) {
+      pieceIdentity[to] = pieceIdentity[from];
+      delete pieceIdentity[from];
+    }
+
+    // For castling, also relocate the rook
+    if (moveObj.flags.includes('k')) {
+      const rank = from[1];
+      if (pieceIdentity['h' + rank]) {
+        pieceIdentity['f' + rank] = pieceIdentity['h' + rank];
+        delete pieceIdentity['h' + rank];
+      }
+    } else if (moveObj.flags.includes('q')) {
+      const rank = from[1];
+      if (pieceIdentity['a' + rank]) {
+        pieceIdentity['d' + rank] = pieceIdentity['a' + rank];
+        delete pieceIdentity['a' + rank];
+      }
+    }
+  }
+
   function sendMove(from, to, promotion) {
     if (socket && socket.readyState === WebSocket.OPEN) {
       // chess.turn() is still the moving player's colour at this point
-      // because the local chess.js state only updates when the server echoes
-      // back a FEN — so this correctly captures whose move it is.
+      // (local state only updates when server echoes back a FEN).
       const isRobotMove = robotPlayers[chess.turn()];
+
+      // Capture the piece name BEFORE updating the identity map.
+      const pieceName = pieceIdentity[from] || '';
+
+      // Update piece identity tracking and refresh board labels.
+      updatePieceIdentityOnMove(from, to, promotion);
+      updatePieceLabels();
+
       isBoardLocked = true;
       $('#boardOverlay').addClass('active');
-      const msg = { from, to, robot: isRobotMove };
+      const msg = { from, to, robot: isRobotMove, piece: pieceName };
       if (promotion) msg.promotion = promotion;
       socket.send(JSON.stringify(msg));
     }
@@ -1251,7 +1383,12 @@
     fetch('/reset', { method: 'POST' })
       .then(r => r.json())
       .then(data => {
-        if (data.fen) { board.position(data.fen, false); updateTurnDisplay(data.fen); }
+        if (data.fen) {
+          board.position(data.fen, false);
+          updateTurnDisplay(data.fen);
+          resetPieceIdentity();
+          updatePieceLabels();
+        }
       })
       .catch(() => logEvent('Reset request failed.'));
   });
@@ -1259,8 +1396,10 @@
   // =========================================================================
   // Boot
   // =========================================================================
+  resetPieceIdentity();
   connect();
   switchMode('select');
+  updatePieceLabels();
 
 })();
 </script>

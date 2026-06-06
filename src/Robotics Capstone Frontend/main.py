@@ -3,10 +3,12 @@ Accessible Robotic Chess Player — Backend & WebSocket Server
 FastAPI core: validates moves via python-chess, broadcasts FEN, triggers robot.
 """
 
+import argparse
 import asyncio
 import json
 import logging
 import os
+import sys
 import tempfile
 from contextlib import asynccontextmanager
 from typing import List
@@ -112,9 +114,34 @@ class GameState:
 # App Lifespan & Initialisation
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Parse rosbridge address from the command line
+# ---------------------------------------------------------------------------
+_parser = argparse.ArgumentParser(
+    description="Robotic Chess web server",
+    formatter_class=argparse.RawDescriptionHelpFormatter,
+    epilog="Example:\n  python main.py 172.28.7.137:9090",
+)
+_parser.add_argument(
+    "rosbridge",
+    metavar="IP:PORT",
+    help="Rosbridge WebSocket address of the robot, e.g. 172.28.7.137:9090",
+)
+_args = _parser.parse_args()
+
+try:
+    _rb_host, _rb_port_str = _args.rosbridge.rsplit(":", 1)
+    _rb_port = int(_rb_port_str)
+    if not _rb_host:
+        raise ValueError("host is empty")
+except ValueError:
+    _parser.error(f"Invalid address {_args.rosbridge!r} — expected IP:PORT, e.g. 172.28.7.137:9090")
+
+log.info("Rosbridge target: ws://%s:%d", _rb_host, _rb_port)
+
 manager = ConnectionManager()
 game = GameState()
-robot = RobotController()
+robot = RobotController(host=_rb_host, port=_rb_port)
 
 
 @asynccontextmanager
@@ -218,6 +245,7 @@ async def websocket_endpoint(ws: WebSocket):
             from_sq    = data.get("from", "")
             to_sq      = data.get("to", "")
             robot_move = bool(data.get("robot", False))
+            piece_name = data.get("piece", "")   # e.g. "WhitePawn3" from the UI identity tracker
 
             if not from_sq or not to_sq:
                 await ws.send_text(json.dumps({"fen": game.fen, "event": "error",
@@ -294,11 +322,12 @@ async def websocket_endpoint(ws: WebSocket):
                             fsq=from_sq, tsq=to_sq,
                             cap=game.last_move_was_capture(),
                             cr=castling_rook, ep=ep_capture_sq, pm=promo_marker_id,
+                            pn=piece_name,
                         ):
                             await robot.execute_move(
                                 from_square=fsq, to_square=tsq, is_capture=cap,
                                 castling_rook=cr, ep_capture_sq=ep,
-                                promo_marker_id=pm,
+                                promo_marker_id=pm, piece_name=pn,
                             )
                             await manager.broadcast({"event": "robot_idle"})
 
