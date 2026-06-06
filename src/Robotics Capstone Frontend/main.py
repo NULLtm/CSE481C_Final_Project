@@ -249,11 +249,12 @@ async def websocket_endpoint(ws: WebSocket):
                                                "detail": "Invalid JSON"}))
                 continue
 
-            from_sq    = data.get("from", "")
-            to_sq      = data.get("to", "")
-            robot_move = bool(data.get("robot", False))
-            piece_name = data.get("piece", "")            # e.g. "WhitePawn3" from the UI identity tracker
-            captured_piece_name = data.get("captured_piece", "")  # e.g. "BlackPawn5", populated on captures
+            from_sq             = data.get("from", "")
+            to_sq               = data.get("to", "")
+            robot_move          = bool(data.get("robot", False))
+            piece_name          = data.get("piece", "")           # moving piece ArUco name
+            captured_piece_name = data.get("captured_piece", "")  # captured piece ArUco name
+            rook_piece_name     = data.get("rook_piece", "")      # castling rook ArUco name
 
             if not from_sq or not to_sq:
                 await ws.send_text(json.dumps({"fen": game.fen, "event": "error",
@@ -333,12 +334,13 @@ async def websocket_endpoint(ws: WebSocket):
                             cr=castling_rook, ep=ep_capture_sq,
                             promo=promotion_letter,
                             pn=piece_name, cpn=captured_piece_name,
+                            rpn=rook_piece_name,
                         ):
                             await robot.execute_move(
                                 from_square=fsq, to_square=tsq, is_capture=cap,
                                 castling_rook=cr, ep_capture_sq=ep,
                                 promotion=promo, piece_name=pn,
-                                captured_piece_name=cpn,
+                                captured_piece_name=cpn, rook_piece_name=rpn,
                             )
                             await manager.broadcast({"event": "robot_idle"})
 
