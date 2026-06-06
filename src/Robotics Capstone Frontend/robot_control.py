@@ -33,7 +33,7 @@ BOARD_STATE_TOPIC = "/chess/board_state"   # std_msgs/String (JSON from aruco no
 
 SERVICE_MOVE        = "/chess/move"          # interfaces/srv/Move
 SERVICE_TAKE        = "/chess/take"          # interfaces/srv/Move (same type)
-SERVICE_EN_PASSANT  = "/chess/en_passant"    # interfaces/srv/EnPassant
+SERVICE_EN_PASSANT  = "/chess/enPassant"     # interfaces/srv/EnPassant
 SERVICE_CASTLE      = "/chess/castle"        # interfaces/srv/Castle
 SERVICE_PROMOTE     = "/chess/promote"       # interfaces/srv/Promote
 
@@ -239,6 +239,7 @@ class RobotController:
         promotion: str = "",
         piece_name: str = "",
         captured_piece_name: str = "",
+        rook_piece_name: str = "",
     ) -> None:
         """
         Orchestrate the physical move sequence without blocking the asyncio
@@ -267,7 +268,7 @@ class RobotController:
             await asyncio.to_thread(
                 self._execute_sync,
                 from_square, to_square, is_capture,
-                castling_rook, ep_capture_sq, promotion, piece_name, captured_piece_name,
+                castling_rook, ep_capture_sq, promotion, piece_name, captured_piece_name, rook_piece_name,
             )
         except Exception:
             log.exception("Unhandled error during move %s → %s", from_square, to_square)
@@ -289,10 +290,11 @@ class RobotController:
         promotion: str = "",
         piece_name: str = "",
         captured_piece_name: str = "",
+        rook_piece_name: str = "",
     ) -> None:
         if castling_rook is not None:
             rook_from, rook_to = castling_rook
-            self._castle(from_square, to_square, rook_from, rook_to, piece_name)
+            self._castle(from_square, to_square, rook_from, rook_to, piece_name, rook_piece_name)
         elif ep_capture_sq:
             if not captured_piece_name:
                 captured_piece_name = self._piece_name_at(ep_capture_sq)
@@ -427,6 +429,7 @@ class RobotController:
         rook_from: str,
         rook_to: str,
         king_piece: str = "",
+        rook_piece: str = "",
     ) -> bool:
         """Call /chess/castle (Castle.srv) to move king and rook in one service call."""
         kf_file, kf_rank = _parse_square(king_from)
@@ -434,7 +437,7 @@ class RobotController:
         rf_file, rf_rank = _parse_square(rook_from)
         rt_file, rt_rank = _parse_square(rook_to)
         king = king_piece if king_piece else self._piece_name_at(king_from)
-        rook = self._piece_name_at(rook_from)
+        rook = rook_piece if rook_piece else self._piece_name_at(rook_from)
         log.info(
             "  [CASTLE] king %s → %s  rook %s → %s  king=%s  rook=%s",
             king_from.upper(), king_to.upper(), rook_from.upper(), rook_to.upper(), king, rook,

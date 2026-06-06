@@ -978,13 +978,26 @@
         }
       }
 
+      // For castling, also look up the rook's name from pieceIdentity while we
+      // still have the pre-move state.  Kingside rook is on the h-file, queenside
+      // on the a-file — same rank as the king.
+      let rookPieceName = '';
+      if (moveObj) {
+        if (moveObj.flags.includes('k')) {          // kingside castle
+          rookPieceName = pieceIdentity['h' + from[1]] || '';
+        } else if (moveObj.flags.includes('q')) {   // queenside castle
+          rookPieceName = pieceIdentity['a' + from[1]] || '';
+        }
+      }
+
       // Store pending move — identity map is updated only after server confirms.
       pendingMove = { from, to, promotion };
 
       isBoardLocked = true;
       $('#boardOverlay').addClass('active');
       const msg = { from, to, robot: isRobotMove, piece: pieceName, captured_piece: capturedPieceName };
-      if (promotion) msg.promotion = promotion;
+      if (promotion)     msg.promotion  = promotion;
+      if (rookPieceName) msg.rook_piece = rookPieceName;
       socket.send(JSON.stringify(msg));
     }
   }
