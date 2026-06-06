@@ -209,6 +209,13 @@ async def transcribe_audio(file: UploadFile = File(...)):
         os.unlink(tmp_path)
 
 
+@app.post("/reset_stretch")
+async def reset_stretch():
+    """Send the Stretch robot to its home/stow position."""
+    await asyncio.to_thread(robot.reset)
+    return {"status": "ok"}
+
+
 @app.post("/reset")
 async def reset_game():
     """Reset the board to the starting position and notify all clients."""
@@ -255,12 +262,15 @@ async def websocket_endpoint(ws: WebSocket):
 
             uci = f"{from_sq}{to_sq}"
 
-            # Handle pawn promotion — default to queen if client sent no choice.
-            if len(data.get("promotion", "")) == 1:
-                uci += data["promotion"]
+            # Extract promotion letter ('q','r','b','n') before appending to UCI.
+            promotion_letter = data.get("promotion", "")
+            if len(promotion_letter) == 1:
+                uci += promotion_letter
+            else:
+                promotion_letter = ""
 
             # --- Detect special move types on the PRE-PUSH board state ---
-            castling_rook = ep_capture_sq = promo_marker_id = None
+            castling_rook = ep_capture_sq = None
             try:
                 move_obj = chess.Move.from_uci(uci)
                 if move_obj in game.board.legal_moves:
@@ -281,8 +291,6 @@ async def websocket_endpoint(ws: WebSocket):
                             chess.square_file(move_obj.to_square),
                             chess.square_rank(move_obj.from_square),
                         ))
-                    if move_obj.promotion is not None:
-                        promo_marker_id = 49 if game.board.turn == chess.WHITE else 50
             except ValueError:
                 pass  # apply_move will reject malformed UCI below
 
@@ -322,13 +330,14 @@ async def websocket_endpoint(ws: WebSocket):
                         async def _run_and_notify(
                             fsq=from_sq, tsq=to_sq,
                             cap=game.last_move_was_capture(),
-                            cr=castling_rook, ep=ep_capture_sq, pm=promo_marker_id,
+                            cr=castling_rook, ep=ep_capture_sq,
+                            promo=promotion_letter,
                             pn=piece_name, cpn=captured_piece_name,
                         ):
                             await robot.execute_move(
                                 from_square=fsq, to_square=tsq, is_capture=cap,
                                 castling_rook=cr, ep_capture_sq=ep,
-                                promo_marker_id=pm, piece_name=pn,
+                                promotion=promo, piece_name=pn,
                                 captured_piece_name=cpn,
                             )
                             await manager.broadcast({"event": "robot_idle"})
