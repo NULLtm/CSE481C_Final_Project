@@ -6,7 +6,7 @@
     <title>Robot Control Panel</title>
     <style>
         body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f0f0f0; }
-        .container { text-align: center; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); min-width: 350px; }
+        .container { text-align: center; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); min-width: 450px; }
         
         .form-group { margin-bottom: 1.5rem; }
         select, button { padding: 0.5rem; font-size: 1rem; margin: 0.2rem; border-radius: 4px; }
@@ -57,7 +57,11 @@
         </div>
 
         <div id="movePanel" class="control-panel">
-            <p>Move from a starting location to an ending location.</p>
+            <p>Move a piece from a starting location to an ending location.</p>
+            <div class="location-group">
+                <label>Piece:</label>
+                <select class="piece-select" id="moveStartPiece"></select>
+            </div>
             <div class="location-group">
                 <label>Start:</label>
                 <select class="file-select" id="moveStartFile"></select>
@@ -72,7 +76,15 @@
         </div>
 
         <div id="takePanel" class="control-panel">
-            <p>Take from a starting location to an ending location.</p>
+            <p>Take an opponent's piece.</p>
+            <div class="location-group">
+                <label>Taking Piece:</label>
+                <select class="piece-select" id="takeStartPiece"></select>
+            </div>
+            <div class="location-group">
+                <label>Target Piece:</label>
+                <select class="piece-select" id="takeEndPiece"></select>
+            </div>
             <div class="location-group">
                 <label>Start:</label>
                 <select class="file-select" id="takeStartFile"></select>
@@ -101,9 +113,18 @@
         const msgDiv = document.getElementById('message');
         const allButtons = document.querySelectorAll('.action-btn');
 
-        // Populate File (A-H) and Rank (1-8) dropdowns dynamically to keep HTML clean
+        // Populate File (A-H), Rank (1-8), and Pieces dropdowns dynamically
         const files = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
         const ranks = ['1', '2', '3', '4', '5', '6', '7', '8'];
+        const pieces = [
+            'BlackRook1', 'BlackPawn1', 'WhitePawn1', 'WhiteRook1', 'BlackKnight1', 
+            'BlackPawn2', 'WhitePawn2', 'WhiteKnight1', 'BlackBishop1', 'BlackPawn3', 
+            'WhitePawn3', 'WhiteBishop1', 'BlackKing1', 'BlackPawn4', 'WhitePawn4', 
+            'WhiteQueen1', 'BlackQueen1', 'BlackPawn5', 'WhitePawn5', 'WhiteKing1', 
+            'BlackBishop2', 'BlackPawn6', 'WhitePawn6', 'WhiteBishop2', 'BlackKnight2', 
+            'BlackPawn7', 'WhitePawn7', 'WhiteKnight2', 'BlackRook2', 'BlackPawn8', 
+            'WhiteRook2', 'WhitePawn8'
+        ];
 
         document.querySelectorAll('.file-select').forEach(select => {
             files.forEach(file => select.add(new Option(file, file)));
@@ -111,14 +132,14 @@
         document.querySelectorAll('.rank-select').forEach(select => {
             ranks.forEach(rank => select.add(new Option(rank, rank)));
         });
+        document.querySelectorAll('.piece-select').forEach(select => {
+            pieces.forEach(piece => select.add(new Option(piece, piece)));
+        });
 
         // --- Handle Mode Switching ---
         modeSelect.addEventListener('change', (e) => {
-            // Hide all panels
             Object.values(panels).forEach(panel => panel.classList.remove('active'));
-            // Show selected panel
             panels[e.target.value].classList.add('active');
-            // Hide message on mode switch
             msgDiv.style.display = 'none';
         });
 
@@ -126,7 +147,6 @@
         async function sendCommand(button, payload) {
             const endpoint = button.getAttribute('data-endpoint');
             
-            // UI State: Loading
             allButtons.forEach(btn => btn.disabled = true);
             showMessage('Sending command...', 'loading');
 
@@ -147,7 +167,6 @@
             } catch (err) {
                 showMessage('Failed to connect to server.', 'error');
             } finally {
-                // UI State: Restore
                 allButtons.forEach(btn => btn.disabled = false);
             }
         }
@@ -173,6 +192,7 @@
 
         document.getElementById('moveBtn').addEventListener('click', function() {
             const payload = {
+                start_piece: document.getElementById('moveStartPiece').value,
                 start_file: document.getElementById('moveStartFile').value,
                 start_rank: document.getElementById('moveStartRank').value,
                 end_file: document.getElementById('moveEndFile').value,
@@ -183,6 +203,8 @@
 
         document.getElementById('takeBtn').addEventListener('click', function() {
             const payload = {
+                start_piece: document.getElementById('takeStartPiece').value,
+                end_piece: document.getElementById('takeEndPiece').value,
                 start_file: document.getElementById('takeStartFile').value,
                 start_rank: document.getElementById('takeStartRank').value,
                 end_file: document.getElementById('takeEndFile').value,

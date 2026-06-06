@@ -4,6 +4,8 @@ string start_rank
 string start_file
 string end_rank
 string end_file
+string piece_start
+string piece_end
 ---
 # Response (Server -> Client)
 string message

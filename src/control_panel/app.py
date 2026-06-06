@@ -20,7 +20,7 @@ class RobotClient(Node):
         self.align_client = self.create_client(Align, '/chess/align')
         # 3. Setup Move Client
         self.move_client = self.create_client(Move, '/chess/move')
-        # 3. Setup Take Client
+        # 4. Setup Take Client
         self.take_client = self.create_client(Move, '/chess/take')
 
         self.get_logger().info('Waiting for ROS 2 services to become available...')
@@ -49,7 +49,6 @@ def reset_robot():
         return jsonify({"status": "error", "message": "ROS 2 node or service not ready"}), 500
 
     req = Trigger.Request()
-    # TODO: Populate any necessary fields for your Reset request here
     
     future = robot_node.reset_client.call_async(req)
     
@@ -58,7 +57,6 @@ def reset_robot():
     
     try:
         response = future.result()
-        # TODO: Adjust to read your specific response attributes
         return jsonify({"status": "success", "message": "Reset executed successfully."})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -69,16 +67,11 @@ def align_robot():
     if robot_node is None or not robot_node.align_client.service_is_ready():
         return jsonify({"status": "error", "message": "ROS 2 node or service not ready"}), 500
 
-    # Extract JSON payload from frontend
     data = request.get_json()
     target_file = data.get('file')
     target_rank = data.get('rank')
 
     req = Align.Request()
-    # TODO: Map target_file and target_rank to your Request object
-    # e.g., req.file = target_file
-    # e.g., req.rank = int(target_rank)
-
     req.file = target_file
     req.rank = target_rank
     
@@ -99,17 +92,16 @@ def move_robot():
     if robot_node is None or not robot_node.move_client.service_is_ready():
         return jsonify({"status": "error", "message": "ROS 2 node or service not ready"}), 500
 
-    # Extract JSON payload from frontend
     data = request.get_json()
+    start_piece = data.get('start_piece')
     start_file = data.get('start_file')
     start_rank = data.get('start_rank')
     end_file = data.get('end_file')
     end_rank = data.get('end_rank')
 
     req = Move.Request()
-    # TODO: Map start/end files and ranks to your Request object
-    # e.g., req.start_pos = f"{start_file}{start_rank}"
-
+    req.start_piece = start_piece
+    req.end_piece = "" # Explicitly left empty for move
     req.start_file = start_file
     req.end_file = end_file
     req.start_rank = start_rank
@@ -122,7 +114,7 @@ def move_robot():
     
     try:
         response = future.result()
-        return jsonify({"status": "success", "message": f"Moved from {start_file}{start_rank} to {end_file}{end_rank}."})
+        return jsonify({"status": "success", "message": f"Moved {start_piece} from {start_file}{start_rank} to {end_file}{end_rank}."})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
     
@@ -132,17 +124,17 @@ def take_robot():
     if robot_node is None or not robot_node.take_client.service_is_ready():
         return jsonify({"status": "error", "message": "ROS 2 node or service not ready"}), 500
 
-    # Extract JSON payload from frontend
     data = request.get_json()
+    start_piece = data.get('start_piece')
+    end_piece = data.get('end_piece')
     start_file = data.get('start_file')
     start_rank = data.get('start_rank')
     end_file = data.get('end_file')
     end_rank = data.get('end_rank')
 
     req = Move.Request()
-    # TODO: Map start/end files and ranks to your Request object
-    # e.g., req.start_pos = f"{start_file}{start_rank}"
-
+    req.start_piece = start_piece
+    req.end_piece = end_piece
     req.start_file = start_file
     req.end_file = end_file
     req.start_rank = start_rank
@@ -155,17 +147,14 @@ def take_robot():
     
     try:
         response = future.result()
-        return jsonify({"status": "success", "message": f"Took from {start_file}{start_rank} to {end_file}{end_rank}."})
+        return jsonify({"status": "success", "message": f"Piece {start_piece} at {start_file}{start_rank} took {end_piece} at {end_file}{end_rank}."})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
-    # Start ROS 2 in a separate thread
     thread = threading.Thread(target=ros_spin_thread, daemon=True)
     thread.start()
     
-    # Give it a moment to initialize
     time.sleep(2)
     
-    # Run the Flask app
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)

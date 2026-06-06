@@ -13,6 +13,9 @@ source install/setup.bash
 LAUNCH BACKEND:
 ros2 launch aaso_final_project dev.launch.py
 
+ROSBRIDGE:
+ros2 launch rosbridge_server rosbridge_websocket_launch.xml
+
 # IMPORTANT -- DO THIS
 ros2 service call /home_the_robot std_srvs/srv/Trigger
 
