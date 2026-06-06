@@ -754,7 +754,7 @@
   let currentMode = 'select'; // 'select' | 'voice'
   let selectedSquare = null;
   let moveNumber = 1;
-  let pendingMove = null; // { from, to, promotion } — committed only on server 'move' event
+  let pendingMove = null; // cleared on every server response; guards against stale state
 
   // Tracks whether each player's moves should be physically executed by the robot.
   // false = human only (digital board updates, robot stays still)
@@ -806,9 +806,19 @@
       let msg;
       try { msg = JSON.parse(evt.data); } catch { return; }
 
-      // Unlock board upon receiving any valid server response
-      isBoardLocked = false;
-      $('#boardOverlay').removeClass('active'); 
+      // ---------------------------------------------------------------
+      // Update piece identity BEFORE loading the new FEN so chess.js
+      // still reflects the pre-move board when we call chess.moves().
+      // This runs on ALL connected clients, not just the one that moved.
+      // ---------------------------------------------------------------
+      if (msg.event === 'move' && msg.uci) {
+        const from  = msg.uci.slice(0, 2);
+        const to    = msg.uci.slice(2, 4);
+        const promo = msg.uci.length > 4 ? msg.uci[4] : '';
+        updatePieceIdentityOnMove(from, to, promo);
+      }
+      // pendingMove is no longer needed for identity — clear it regardless.
+      pendingMove = null;
 
       if (msg.fen) {
         board.position(msg.fen, false); // false = instant snap to new FEN
@@ -818,18 +828,23 @@
       }
 
       if (msg.event === 'invalid') {
-        pendingMove = null; // discard — identity map stays unchanged
+        // Invalid move — unlock immediately, identity map unchanged.
+        isBoardLocked = false;
+        $('#boardOverlay').removeClass('active');
         clearSelection();
         setVoiceResult(`Could not play "${msg.uci}". Try again.`, 'error');
       } else if (msg.event === 'move' && msg.uci) {
-        if (pendingMove) {
-          updatePieceIdentityOnMove(pendingMove.from, pendingMove.to, pendingMove.promotion);
-          updatePieceLabels();
-          pendingMove = null;
+        // Only unlock if the robot is NOT about to execute this move physically.
+        // If robot_executing, stay locked until 'robot_idle' arrives.
+        if (!msg.robot_executing) {
+          isBoardLocked = false;
+          $('#boardOverlay').removeClass('active');
         }
         logMove(msg.uci);
         clearSelection();
       } else if (msg.event === 'reset') {
+        isBoardLocked = false;
+        $('#boardOverlay').removeClass('active');
         $('#moveLog').empty();
         moveNumber = 1;
         clearSelection();
@@ -838,11 +853,16 @@
         updatePieceLabels();
         logEvent('Game reset.');
       } else if (msg.event === 'sync') {
+        isBoardLocked = false;
+        $('#boardOverlay').removeClass('active');
         logEvent('Board synchronised.');
       } else if (msg.event === 'robot_busy') {
         $('#robotBusyOverlay').show();
         logEvent('Robot executing move…');
       } else if (msg.event === 'robot_idle') {
+        // Robot finished — now safe to unlock the board.
+        isBoardLocked = false;
+        $('#boardOverlay').removeClass('active');
         $('#robotBusyOverlay').hide();
         logEvent('Robot ready.');
       } else if (msg.event === 'game_over' && msg.reason) {
@@ -989,9 +1009,6 @@
           rookPieceName = pieceIdentity['a' + from[1]] || '';
         }
       }
-
-      // Store pending move — identity map is updated only after server confirms.
-      pendingMove = { from, to, promotion };
 
       isBoardLocked = true;
       $('#boardOverlay').addClass('active');
