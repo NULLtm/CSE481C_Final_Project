@@ -277,17 +277,22 @@ class RobotController:
         captured_piece_name: str = "",
     ) -> None:
         if is_capture:
-            capture_sq = ep_capture_sq if ep_capture_sq else to_square
-            # Use the UI identity tracker value; fall back to camera only if not provided.
-            if not captured_piece_name:
-                captured_piece_name = self._piece_name_at(capture_sq)
-            self._take(capture_sq)
+            if ep_capture_sq:
+                # En passant: captured pawn is not at to_square — remove it first,
+                # then move the taking pawn separately.
+                if not captured_piece_name:
+                    captured_piece_name = self._piece_name_at(ep_capture_sq)
+                self._take(ep_capture_sq, ep_capture_sq, "", captured_piece_name)
+                self._move(from_square, to_square, piece_name, "unknown")
+            else:
+                # Normal capture: take_callback handles remove + move in one call.
+                if not captured_piece_name:
+                    captured_piece_name = self._piece_name_at(to_square)
+                self._take(from_square, to_square, piece_name, captured_piece_name)
+        else:
+            self._move(from_square, to_square, piece_name, "unknown")
 
-        # Move the main piece; pass both piece_start and piece_end so the
-        # robot driver has full context (piece_end is "unknown" for non-captures).
-        self._move(from_square, to_square, piece_name, captured_piece_name)
-
-        # For castling, also move the rook (camera lookup for rook identity).
+        # For castling, also move the rook.
         if castling_rook is not None:
             rook_from, rook_to = castling_rook
             self._move(rook_from, rook_to)
@@ -303,19 +308,13 @@ class RobotController:
         piece_name: str = "",
         captured_piece: str = "unknown",
     ) -> bool:
-        """Call /chess/move to pick up the piece at from_sq and place it at to_sq.
-
-        piece_name    → piece_start field: full marker name from UI identity
-                        tracker (e.g. 'WhitePawn3'); falls back to camera if empty.
-        captured_piece → piece_end field: marker name of the piece that was at
-                        to_sq before the move ('unknown' for non-captures).
-        """
+        """Call /chess/move to pick up the piece at from_sq and place it at to_sq."""
         from_file, from_rank = _parse_square(from_sq)
         to_file,   to_rank   = _parse_square(to_sq)
-        piece_start = piece_name if piece_name else self._piece_name_at(from_sq)
+        start_piece = piece_name if piece_name else self._piece_name_at(from_sq)
         log.info(
-            "  [MOVE] %s → %s  (piece_start=%s piece_end=%s)",
-            from_sq.upper(), to_sq.upper(), piece_start, captured_piece,
+            "  [MOVE] %s → %s  (start_piece=%s end_piece=%s)",
+            from_sq.upper(), to_sq.upper(), start_piece, captured_piece,
         )
         response = self._bridge.call_service(
             SERVICE_MOVE,
@@ -325,8 +324,8 @@ class RobotController:
                 "start_rank":  from_rank,
                 "end_file":    to_file,
                 "end_rank":    to_rank,
-                "piece_start": piece_start,
-                "piece_end":   captured_piece,
+                "start_piece": start_piece,
+                "end_piece":   captured_piece,
             },
         )
         ok = bool(response and response.get("success", False))
@@ -336,22 +335,35 @@ class RobotController:
             log.info("  [MOVE] OK — %s", response.get("message", ""))
         return ok
 
-    def _take(self, square: str) -> bool:
-        """Call /chess/take to pick up and discard the piece at square."""
-        file, rank = _parse_square(square)
-        piece = self._piece_name_at(square)
-        log.info("  [TAKE] clearing %s  (piece_start=%s)", square.upper(), piece)
-        # chess_driver's take_callback reads end_file / end_rank for the target square.
+    def _take(
+        self,
+        from_sq: str,
+        to_sq: str,
+        piece_name: str = "",
+        captured_piece: str = "unknown",
+    ) -> bool:
+        """Call /chess/take: discard the piece at to_sq then move piece_name from from_sq to to_sq.
+
+        from_sq / piece_name:   the capturing piece and its origin square (start_piece).
+        to_sq / captured_piece: the captured piece's square and its marker name (end_piece).
+        """
+        from_file, from_rank = _parse_square(from_sq)
+        to_file,   to_rank   = _parse_square(to_sq)
+        start_piece = piece_name if piece_name else self._piece_name_at(from_sq)
+        log.info(
+            "  [TAKE] %s captures at %s  (start_piece=%s end_piece=%s)",
+            from_sq.upper(), to_sq.upper(), start_piece, captured_piece,
+        )
         response = self._bridge.call_service(
             SERVICE_TAKE,
             SERVICE_TYPE_MOVE,
             {
-                "start_file":  file,
-                "start_rank":  rank,
-                "end_file":    file,
-                "end_rank":    rank,
-                "piece_start": piece,
-                "piece_end":   "unknown",
+                "start_file":  from_file,
+                "start_rank":  from_rank,
+                "end_file":    to_file,
+                "end_rank":    to_rank,
+                "start_piece": start_piece,
+                "end_piece":   captured_piece,
             },
         )
         ok = bool(response and response.get("success", False))
