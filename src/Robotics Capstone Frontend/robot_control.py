@@ -33,7 +33,7 @@ BOARD_STATE_TOPIC = "/chess/board_state"   # std_msgs/String (JSON from aruco no
 
 SERVICE_MOVE        = "/chess/move"          # interfaces/srv/Move
 SERVICE_TAKE        = "/chess/take"          # interfaces/srv/Move (same type)
-SERVICE_EN_PASSANT  = "/chess/enPassant"     # interfaces/srv/EnPassant
+SERVICE_EN_PASSANT  = "/chess/enpassant"     # interfaces/srv/EnPassant
 SERVICE_CASTLE      = "/chess/castle"        # interfaces/srv/Castle
 SERVICE_PROMOTE     = "/chess/promote"       # interfaces/srv/Promote
 
