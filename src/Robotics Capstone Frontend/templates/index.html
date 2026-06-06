@@ -587,20 +587,7 @@
     /* Piece Identity Labels                                               */
     /* ------------------------------------------------------------------ */
     .piece-label {
-      position: absolute;
-      bottom: 3px;
-      right: 3px;
-      font-size: 0.52rem;
-      font-weight: 800;
-      color: rgba(255, 255, 255, 0.95);
-      text-shadow:
-        0 0 3px rgba(0,0,0,1),
-        0 0 6px rgba(0,0,0,0.8),
-        1px 1px 0 rgba(0,0,0,0.9);
-      pointer-events: none;
-      z-index: 10;
-      line-height: 1;
-      letter-spacing: 0.01em;
+      display: none;
     }
 
     /* ------------------------------------------------------------------ */
@@ -727,6 +714,7 @@
     <div class="controls">
       <button class="std-btn btn-secondary" id="btnFlip">Flip Board</button>
       <button class="std-btn btn-primary"   id="btnReset">New Game</button>
+      <button class="std-btn btn-secondary" id="btnResetStretch">Reset Stretch</button>
     </div>
   </div>
 
@@ -766,6 +754,7 @@
   let currentMode = 'select'; // 'select' | 'voice'
   let selectedSquare = null;
   let moveNumber = 1;
+  let pendingMove = null; // { from, to, promotion } — committed only on server 'move' event
 
   // Tracks whether each player's moves should be physically executed by the robot.
   // false = human only (digital board updates, robot stays still)
@@ -829,9 +818,15 @@
       }
 
       if (msg.event === 'invalid') {
+        pendingMove = null; // discard — identity map stays unchanged
         clearSelection();
         setVoiceResult(`Could not play "${msg.uci}". Try again.`, 'error');
       } else if (msg.event === 'move' && msg.uci) {
+        if (pendingMove) {
+          updatePieceIdentityOnMove(pendingMove.from, pendingMove.to, pendingMove.promotion);
+          updatePieceLabels();
+          pendingMove = null;
+        }
         logMove(msg.uci);
         clearSelection();
       } else if (msg.event === 'reset') {
@@ -983,9 +978,8 @@
         }
       }
 
-      // Update piece identity tracking and refresh board labels.
-      updatePieceIdentityOnMove(from, to, promotion);
-      updatePieceLabels();
+      // Store pending move — identity map is updated only after server confirms.
+      pendingMove = { from, to, promotion };
 
       isBoardLocked = true;
       $('#boardOverlay').addClass('active');
@@ -1392,6 +1386,14 @@
   // Button handlers
   // =========================================================================
   $('#btnFlip').on('click', () => board.flip());
+
+  $('#btnResetStretch').on('click', () => {
+    if (!confirm('Send the Stretch robot to its home position?')) return;
+    fetch('/reset_stretch', { method: 'POST' })
+      .then(r => r.json())
+      .then(() => logEvent('Stretch reset requested.'))
+      .catch(() => logEvent('Reset Stretch request failed.'));
+  });
 
   $('#btnReset').on('click', () => {
     if (!confirm('Start a new game? The current game will be lost.')) return;
