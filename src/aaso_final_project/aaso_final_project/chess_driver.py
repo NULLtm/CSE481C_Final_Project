@@ -28,6 +28,36 @@ from std_srvs.srv import Trigger
 
 
 class ChessDriver(Node):
+
+    # Constants -- to be tuned depending
+
+    GRIPPER_OPEN = 0.13
+    GRIPPER_CLOSED = 0.0
+
+    LIFT_TOP = 1.01
+    LIFT_PICKUP_HEIGHT = 0.80
+    LIFT_DROP_HEIGHT = 0.80
+
+    WRIST_YAW_DISCARD = 0
+    WRIST_YAW_NORMAL = math.pi
+
+    WRIST_PITCH_DISCARD = 0
+    WRIST_PITCH_NORMAL = -math.pi / 2
+
+    WRIST_EXTENSION_DISCARD = 0.45
+    WRIST_EXTENSION_RESET = 0.0
+
+    WRIST_RETRACTION_ERROR = 0.01
+
+    ONE_RANK_DISTANCE = 0.071
+
+    RANK_ADJUSTMENT_OFFSET = -0.05 + 0.035
+    FILE_ADJUSTMENT_OFFSET = 0.034
+
+    RANK_ERROR_ALLOWED = 0.005
+    FILE_ERROR_ALLOWED = 0.01
+
+
     def __init__(self):
         super().__init__('aruco_base_align_node')
 
@@ -60,7 +90,6 @@ class ChessDriver(Node):
             callback_group=self.cb_group
         )
 
-        # 6. Align Service Server
         self.move_service = self.create_service(
             Move,
             '/chess/move',
@@ -82,7 +111,6 @@ class ChessDriver(Node):
             callback_group=self.cb_group
         )
 
-        # Add this next to your align service setup
         self.reset_service = self.create_service(
             Trigger,
             '/chess/reset',
@@ -91,88 +119,11 @@ class ChessDriver(Node):
 
         self.previousRank = None
 
-        self.get_logger().info('Chess Driver Initialized. Ready to call /chess/move, /chess/reset')
+        self.get_logger().info('Chess Driver Initialized. Ready to call /chess/move, /chess/reset, /chess/take, /chess/align')
 
     # =========================================================
     # Callbacks & Helpers
     # =========================================================
-
-    def reset_callback(self, request, response):
-        self.get_logger().info("Executing Reset Sequence...")
-        
-        # Step 1: Retract, Lift, Orient Wrist
-        success = self.execute_trajectory(
-            ['joint_lift', 'wrist_extension', 'joint_wrist_yaw', 'joint_wrist_pitch', 'joint_gripper_finger_left'],
-            [1.1, 0.0, 3.14, -1.57, 0.13],
-            duration_sec=6.0
-        )
-        if not success:
-            response.message = "Failed during arm reset."
-            response.success = False
-            return response
-
-        # # --- STEP 2: Rotate Mobile Base Flush with Table ---
-        # self.get_logger().info("Step 2: Scanning for any visible rank marker (1-8)...")
-        
-        # t = None
-        # found_marker_id = None
-
-        # # Loop through ranks 1 to 8 to find the first visible marker
-        # for rank in range(8, 0, -1):
-        #     # Adjust the naming format below to match your setup 
-        #     # (e.g., if your tf frames are strings like "rank_1" or integers like 1)
-        #     target_marker = f"Rank{rank}" 
-            
-        #     t = self.get_marker_transform(target_marker, "base_link")
-        #     if t is not None:
-        #         found_marker_id = target_marker
-        #         self.get_logger().info(f"Found marker '{found_marker_id}'. Using it for alignment.")
-        #         break
-
-        # # If the loop finished and t is still None, we didn't see anything
-        # if t is None:
-        #     response.message = "Could not find any rank markers [1-8] in sight to orient against."
-        #     response.success = False
-        #     return response
-        
-
-        # for atempt in range(2):            
-        #     t = self.get_marker_transform(found_marker_id, "base_link")
-
-        #     # 1. Extract the quaternion rotation from the transform
-        #     qx = t.transform.rotation.x
-        #     qy = t.transform.rotation.y
-        #     qz = t.transform.rotation.z
-        #     qw = t.transform.rotation.w
-
-        #     # 2. Convert Quaternion to Yaw (Rotation around Z-axis)
-        #     siny_cosp = 2.0 * (qw * qz + qx * qy)
-        #     cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
-        #     marker_yaw = math.atan2(siny_cosp, cosy_cosp)
-
-        #     # 3. Calculate the alignment angle
-        #     # Depending on how your marker is physically stuck to the board/table, 
-        #     # you may need an offset. If the marker faces the robot directly when flush,
-        #     # the error is often just the marker_yaw, or marker_yaw ± math.pi
-        #     alignment_error = marker_yaw 
-
-        #     # 4. Get current mobile base joint position and calculate target
-        #     current_rot = self.current_joint_states.get('rotate_mobile_base', 0.0)
-        #     target_rot = current_rot + alignment_error
-
-        #     # 5. Execute movement (Ensure targets are floats!)
-        #     success = self.execute_trajectory(
-        #         ['rotate_mobile_base'],
-        #         [float(target_rot + math.pi / 2)],
-        #         duration_sec=4.0
-        #     )
-        #     if not success:
-        #         response.message = "Failed during base alignment rotation."
-        #         return response
-
-        response.message = "Reset complete."
-        response.success = True
-        return response
 
     def joint_states_callback(self, msg):
         """Continuously caches the latest joint positions."""
@@ -242,23 +193,39 @@ class ChessDriver(Node):
     # Main Service Routine
     # =========================================================
 
+    def reset_callback(self, request, response):
+        self.get_logger().info("Executing Reset Sequence...")
+        
+        # Step 1: Retract, Lift, Orient Wrist
+        success = self.execute_trajectory(
+            ['joint_lift', 'wrist_extension', 'joint_wrist_yaw', 'joint_wrist_pitch', 'joint_gripper_finger_left'],
+            [1.1, 0.0, 3.14, -1.57, 0.13],
+            duration_sec=6.0
+        )
+        if not success:
+            response.message = "Failed during arm reset."
+            response.success = False
+            return response
+
+        response.message = "Reset complete."
+        response.success = True
+        return response
+
     def move_callback(self, request, response):
 
-        # TODO input validation
+        self.get_logger().info('Request received for a move...')
 
-        # move to first square
+        # TODO Input validation?
+
         if self.move_to_square(request.start_file, request.start_rank, response=response) is False:
             return response
 
-        # grab
         if self.grab(response) is False:
             return response        
 
-        # move to first square
         if self.move_to_square(request.end_file, request.end_rank, response=response) is False:
             return response
         
-        # drop
         if self.drop(response):
             response.message = f"Successfully moved piece."
         return response
@@ -266,10 +233,10 @@ class ChessDriver(Node):
     def take_callback(self, request, response):
 
         self.get_logger().info('Request received for a take...')
+
         if self.move_to_square(request.end_file, request.end_rank, response=response) is False:
             return response
 
-        # grab
         if self.grab(response) is False:
             return response
         
@@ -289,10 +256,9 @@ class ChessDriver(Node):
 
     def open_gripper(self, response):
         self.get_logger().info("Opening gripper...")
-        gripper_open_constant = 0.13
         success = self.execute_trajectory(
             ['joint_gripper_finger_left'], 
-            [gripper_open_constant], 
+            [self.GRIPPER_OPEN], 
             duration_sec=5.0
         )
         if not success:
@@ -322,22 +288,26 @@ class ChessDriver(Node):
     def gripper_reset_position(self, response):
         self.get_logger().info("Reset positioning gripper...")
         
-        success = self.execute_trajectory(
-            ['joint_lift', 'wrist_extension', 'joint_wrist_yaw', 'joint_wrist_pitch', 'joint_gripper_finger_left'],
-            [1.1, 0.0, 3.14, -1.57, 0.13],
+        s1 = self.execute_trajectory(
+            ['joint_lift', 'joint_wrist_yaw', 'joint_wrist_pitch', 'joint_gripper_finger_left'],
+            [self.LIFT_TOP, self.WRIST_YAW_NORMAL, self.WRIST_PITCH_NORMAL, self.GRIPPER_OPEN],
             duration_sec=6.0
         )
-        if not success:
+
+        s2 = self.force_reset_wrist()
+
+
+        if not s1 or not s2:
             response.message = "Gripper failed to go into reset position."
             response.success = False
-        return success
+        
+        return s1 and s2
     
     def close_gripper(self, response):
         self.get_logger().info("Closing gripper...")
-        gripper_close_constant = 0.0
         success = self.execute_trajectory(
             ['joint_gripper_finger_left'], 
-            [gripper_close_constant], 
+            [self.GRIPPER_CLOSED], 
             duration_sec=5.0
         )
         if not success:
@@ -345,12 +315,9 @@ class ChessDriver(Node):
             response.success = False
         return success
     
-    def lift_lower(self, response, num):
+    def lift_lower(self, response, height):
         self.get_logger().info("Lowering lift...")
-        lift_lower_constant = num
-        current_lift = self.current_joint_states.get('joint_lift', 0.95)
-        target_lift_down = current_lift - lift_lower_constant
-        success = self.execute_trajectory(['joint_lift'], [target_lift_down], duration_sec=5.0)
+        success = self.execute_trajectory(['joint_lift'], [height], duration_sec=5.0)
         if not success:
             response.message = "Lift failed to lower."
             response.success = False
@@ -358,31 +325,30 @@ class ChessDriver(Node):
     
     def lift_raise(self, response):
         self.get_logger().info("Raising lift...")
-        lift_top_constant = 1.1
-        success = self.execute_trajectory(['joint_lift'], [lift_top_constant], duration_sec=5.0)
+        success = self.execute_trajectory(['joint_lift'], [self.LIFT_TOP], duration_sec=5.0)
         if not success:
             response.message = "Lift failed to raise."
             response.success = False
         return success
     
-    def force_pull_arm(self):
-        self.execute_trajectory(
+
+    def force_reset_wrist(self):
+        success = False
+        for atempts in range(4):
+            cur = self.get_wrist_position()
+
+            if cur < self.WRIST_RETRACTION_ERROR:
+                success = True
+                break
+
+            self.execute_trajectory(
             ['wrist_extension'],
-            [0.0],
+            [self.WRIST_EXTENSION_RESET],
             duration_sec=6.0
-        )
-        time.sleep(1)
-        self.execute_trajectory(
-            ['wrist_extension'],
-            [0.0],
-            duration_sec=6.0
-        )
-        time.sleep(1)
-        self.execute_trajectory(
-            ['wrist_extension'],
-            [0.0],
-            duration_sec=6.0
-        )
+            )
+
+        return success
+
     
     def grab(self, response):
         self.get_logger().info("Grabbing...")
@@ -392,43 +358,40 @@ class ChessDriver(Node):
         
         time.sleep(1)
         
-        if not self.lift_lower(response, 0.07):
+        if not self.lift_lower(response, self.LIFT_PICKUP_HEIGHT):
             return False
         
-        # 1. Get transforms of all three markers relative to the robot's base
-        # Replace 'finger_left' and 'finger_right' with your actual frame names (e.g., 'rank_200')
-        trans_left = self.get_marker_transform('link_aruco_fingertip_left', 'base_link')
-        trans_right = self.tf_buffer.lookup_transform('link_aruco_fingertip_right', 'base_link')
-        trans_target = self.tf_buffer.lookup_transform('BlackPawn3', 'base_link')
+        # # 1. Get transforms of all three markers relative to the robot's base
+        # # Replace 'finger_left' and 'finger_right' with your actual frame names (e.g., 'rank_200')
+        # trans_left = self.get_marker_transform('link_aruco_fingertip_left', 'base_link')
+        # trans_right = self.tf_buffer.lookup_transform('link_aruco_fingertip_right', 'base_link')
+        # trans_target = self.tf_buffer.lookup_transform('BlackPawn3', 'base_link')
 
-        # 2. Calculate the midpoint of the two fingertip markers
-        mid_x = (trans_left.transform.translation.x + trans_right.transform.translation.x) / 2.0
-        mid_y = (trans_left.transform.translation.y + trans_right.transform.translation.y) / 2.0
+        # # 2. Calculate the midpoint of the two fingertip markers
+        # mid_x = (trans_left.transform.translation.x + trans_right.transform.translation.x) / 2.0
+        # mid_y = (trans_left.transform.translation.y + trans_right.transform.translation.y) / 2.0
 
-        # 3. Calculate the relative position of the target with respect to the fingertip midpoint
-        dx = trans_target.transform.translation.x - mid_x
-        dy = trans_target.transform.translation.y - mid_y
+        # # 3. Calculate the relative position of the target with respect to the fingertip midpoint
+        # dx = trans_target.transform.translation.x - mid_x
+        # dy = trans_target.transform.translation.y - mid_y
 
-        # 4. Calculate the required yaw angle correction using atan2
-        # This gives the angle of the target relative to the gripper center in the base_link frame
-        angle_correction = math.atan2(dy, dx)
+        # # 4. Calculate the required yaw angle correction using atan2
+        # # This gives the angle of the target relative to the gripper center in the base_link frame
+        # angle_correction = math.atan2(dy, dx)
         
-        self.get_logger().info(f"Target is off by {angle_correction} radians. Adjusting base...")
+        # self.get_logger().info(f"Target is off by {angle_correction} radians. Adjusting base...")
 
-        # 5. Rotate the mobile base to center the target
-        current_rot = self.current_joint_states.get('rotate_mobile_base', 0.0)
-        target_rot = current_rot + angle_correction
+        # # 5. Rotate the mobile base to center the target
+        # current_rot = self.current_joint_states.get('rotate_mobile_base', 0.0)
+        # target_rot = current_rot + angle_correction
 
-        success = self.execute_trajectory(
-            ['rotate_mobile_base'],
-            [float(target_rot)],
-            duration_sec=3.0
-        )
+        # success = self.execute_trajectory(
+        #     ['rotate_mobile_base'],
+        #     [float(target_rot)],
+        #     duration_sec=3.0
+        # )
         
-        time.sleep(2)
-
-        if not self.lift_lower(response, 0.06):
-            return False
+        # time.sleep(2)
         
         if not self.close_gripper(response):
             return False
@@ -439,19 +402,22 @@ class ChessDriver(Node):
             return False
         
         return True
+    
+    def get_wrist_position(self):
+        return self.current_joint_states.get('joint_arm_l0', 0.0) + self.current_joint_states.get('joint_arm_l1', 0.0) + self.current_joint_states.get('joint_arm_l2', 0.0) + self.current_joint_states.get('joint_arm_l3', 0.0)
         
     def drop(self, response):
         self.get_logger().info("Dropping...")
         
-        if not self.lift_lower(response, 0.14):
+        if not self.lift_lower(response, self.LIFT_DROP_HEIGHT):
             return False
         
-        time.sleep(2)
+        time.sleep(1)
 
         if not self.open_gripper(response):
             return False
         
-        time.sleep(2)
+        time.sleep(1)
 
         if not self.lift_raise(response):
             return False
@@ -483,7 +449,7 @@ class ChessDriver(Node):
 
         if rank == "Rank8W":
             rank = "Rank7W"
-            off_by_one_rank_offset = 0.071
+            off_by_one_rank_offset = self.ONE_RANK_DISTANCE
         
         self.get_logger().info(f"Move to Target Rank: '{target_rank}' | Target File: '{target_file}'")
 
@@ -493,18 +459,11 @@ class ChessDriver(Node):
         if self.previousRank is not None:
             cur = self.current_joint_states.get('translate_mobile_base', 0.0)
             setup = self.execute_trajectory(
-                ['wrist_extension', 'translate_mobile_base'],
-                [0.0, (int(target_rank) - self.previousRank) * 0.07 + cur],
+                ['translate_mobile_base'],
+                [(int(target_rank) - self.previousRank) * self.ONE_RANK_DISTANCE + cur],
                 duration_sec=7.0
             )
-        else:
-            setup = self.execute_trajectory(
-                ['wrist_extension'],
-                [0.0],
-                duration_sec=7.0
-            )
-        
-        self.force_pull_arm()
+        self.force_reset_wrist()
         
         if setup is False:
             response.message = "Reset before move failed."
@@ -514,7 +473,6 @@ class ChessDriver(Node):
         self.get_logger().info(f"Rank adjustment...")
         # --- BASE ALIGNMENT LOOP (RANK) ---
         base_aligned = False
-        target_rank_offset = -0.05 + 0.035
         for attempt in range(4):  # Max 5 iterations to prevent infinite loops
             time.sleep(1.0) # Let the camera and TF buffer catch up after moving
             
@@ -537,10 +495,9 @@ class ChessDriver(Node):
                 continue # Loop again and try to find the real target
                 
             # The target IS visible! Fine-tune the approach.
-            dx = t.transform.translation.x
-            error_x = dx - target_rank_offset + off_by_one_rank_offset
+            error_x = t.transform.translation.x - self.RANK_ADJUSTMENT_OFFSET + off_by_one_rank_offset
             
-            if abs(error_x) < 0.005: # 0.5cm tolerance
+            if abs(error_x) < self.RANK_ERROR_ALLOWED: # 0.5cm tolerance
                 self.get_logger().info("Base successfully aligned to Rank!")
                 base_aligned = True
                 break
@@ -563,18 +520,14 @@ class ChessDriver(Node):
         
         # --- ARM EXTENSION LOOP (FILE) ---
         arm_aligned = False
-        target_file_offset = 0.16 # The 0.2m offset you requested
-
-
         # heuristic first
         index = self.get_file_index(file)
 
         # TODO fix the adjustments for the File
 
-        self.execute_trajectory(['wrist_extension'], [(index + 0.2) * 0.07], duration_sec=5.0)
+        self.execute_trajectory(['wrist_extension'], [(index + 0.2) * self.ONE_RANK_DISTANCE], duration_sec=5.0)
 
-        time.sleep(3)
-
+        time.sleep(2)
         
         for attempt in range(4):
             time.sleep(0.5) 
@@ -587,18 +540,16 @@ class ChessDriver(Node):
                 
             # DEPENDING ON YOUR CAMERA FRAME, THIS MIGHT BE .x OR .y OR .z
             # Measure how far the marker is from the arm's extension axis
-            dy = t.transform.translation.y
-            error_y = dy + 0.034
+            error_y = t.transform.translation.y + self.FILE_ADJUSTMENT_OFFSET
 
-            self.get_logger().info(f'transform y {dy}')
             self.get_logger().info(f'error for the lift {error_y}')
             
-            if abs(error_y) < 0.005: # 2cm tolerance
+            if abs(error_y) < self.FILE_ERROR_ALLOWED: # 2cm tolerance
                 self.get_logger().info("Arm successfully aligned to File!")
                 arm_aligned = True
                 break
-                
-            current_ext = self.current_joint_states.get('joint_arm_l0', 0.0) + self.current_joint_states.get('joint_arm_l1', 0.0) + self.current_joint_states.get('joint_arm_l2', 0.0) + self.current_joint_states.get('joint_arm_l3', 0.0)
+
+            current_ext = self.get_wrist_position()                
             self.get_logger().info(f'current wrist extension is {current_ext}')
 
             target_ext =  error_y + current_ext
