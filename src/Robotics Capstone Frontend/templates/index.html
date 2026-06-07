@@ -892,6 +892,10 @@
       } else if (msg.event === 'sync') {
         isBoardLocked = false;
         $('#boardOverlay').removeClass('active');
+        if (msg.piece_identity) {
+          pieceIdentity = Object.assign({}, msg.piece_identity);
+          updatePieceLabels();
+        }
         logEvent('Board synchronised.');
       } else if (msg.event === 'robot_busy') {
         $('#robotBusyOverlay').show();

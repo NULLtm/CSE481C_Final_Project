@@ -79,6 +79,22 @@ class GameState:
     """Single source of truth for the chess board."""
 
     # ---------------------------------------------------------------------------
+    # Starting square → ArUco marker name mapping (mirrors INITIAL_PIECE_IDENTITY
+    # in index.html).  The server keeps this up to date so new clients that join
+    # mid-game receive the correct state in the 'sync' message.
+    # ---------------------------------------------------------------------------
+    _INITIAL_PIECE_IDENTITY: dict[str, str] = {
+        'a1': 'WhiteRook1',   'b1': 'WhiteKnight1', 'c1': 'WhiteBishop1', 'd1': 'WhiteQueen1',
+        'e1': 'WhiteKing1',   'f1': 'WhiteBishop2', 'g1': 'WhiteKnight2', 'h1': 'WhiteRook2',
+        'a2': 'WhitePawn1',   'b2': 'WhitePawn2',   'c2': 'WhitePawn3',   'd2': 'WhitePawn4',
+        'e2': 'WhitePawn5',   'f2': 'WhitePawn6',   'g2': 'WhitePawn7',   'h2': 'WhitePawn8',
+        'a7': 'BlackPawn1',   'b7': 'BlackPawn2',   'c7': 'BlackPawn3',   'd7': 'BlackPawn4',
+        'e7': 'BlackPawn5',   'f7': 'BlackPawn6',   'g7': 'BlackPawn7',   'h7': 'BlackPawn8',
+        'a8': 'BlackRook1',   'b8': 'BlackKnight1', 'c8': 'BlackBishop1', 'd8': 'BlackQueen1',
+        'e8': 'BlackKing1',   'f8': 'BlackBishop2', 'g8': 'BlackKnight2', 'h8': 'BlackRook2',
+    }
+
+    # ---------------------------------------------------------------------------
     # Spare promotion pieces — keyed by color ('w'/'b') then piece type ('q'/'n').
     # Ordered: first entry is used first.
     # Physical storage locations (file, rank) are defined in robot_control.py.
@@ -98,10 +114,57 @@ class GameState:
     def __init__(self) -> None:
         self.board = chess.Board()
         self._reset_promo_pool()
+        self._reset_piece_identity()
 
     def _reset_promo_pool(self) -> None:
         import copy
         self._promo_pool: dict[str, dict[str, list[str]]] = copy.deepcopy(self._INITIAL_PROMO_POOL)
+
+    def _reset_piece_identity(self) -> None:
+        import copy
+        self._piece_identity: dict[str, str] = copy.deepcopy(self._INITIAL_PIECE_IDENTITY)
+
+    @property
+    def piece_identity(self) -> dict[str, str]:
+        """Return a snapshot of the current square→ArUco-name map."""
+        return dict(self._piece_identity)
+
+    def update_piece_identity(
+        self,
+        from_sq: str,
+        to_sq: str,
+        piece_name: str = "",
+        captured_piece_name: str = "",
+        rook_piece_name: str = "",
+        promotion_letter: str = "",
+        promo_piece_name: str = "",
+        castling_rook: 'tuple[str, str] | None' = None,
+        ep_capture_sq: 'str | None' = None,
+    ) -> None:
+        """Mirror the client-side updatePieceIdentityOnMove() so the server always
+        holds the canonical square→ArUco-name map for syncing new clients."""
+        # Remove the captured piece from the map first.
+        if ep_capture_sq:
+            self._piece_identity.pop(ep_capture_sq, None)
+        elif captured_piece_name:
+            # Normal capture: the destination square will be overwritten below,
+            # but explicitly removing it keeps the map clean.
+            self._piece_identity.pop(to_sq, None)
+
+        # Relocate the moving piece (or place the spare piece for promotions).
+        moving_name = self._piece_identity.get(from_sq) or piece_name
+        dest_name = promo_piece_name if (promotion_letter and promo_piece_name) else moving_name
+        if dest_name:
+            self._piece_identity[to_sq] = dest_name
+        self._piece_identity.pop(from_sq, None)
+
+        # Relocate the rook for castling.
+        if castling_rook:
+            rook_from, rook_to = castling_rook
+            rook_name = self._piece_identity.get(rook_from) or rook_piece_name
+            if rook_name:
+                self._piece_identity[rook_to] = rook_name
+            self._piece_identity.pop(rook_from, None)
 
     @property
     def fen(self) -> str:
@@ -263,9 +326,11 @@ async def reset_game():
     """Reset the board to the starting position and notify all clients."""
     game.board.reset()
     game._reset_promo_pool()
+    game._reset_piece_identity()
     await manager.broadcast({
         "fen": game.fen, "event": "reset",
         "available_promotions": game.available_promotions(),
+        "piece_identity": game.piece_identity,
     })
     log.info("Game reset.")
     return {"status": "ok", "fen": game.fen}
@@ -283,6 +348,7 @@ async def websocket_endpoint(ws: WebSocket):
     await ws.send_text(json.dumps({
         "fen": game.fen, "event": "sync",
         "available_promotions": game.available_promotions(),
+        "piece_identity": game.piece_identity,
     }))
 
     try:
@@ -362,6 +428,19 @@ async def websocket_endpoint(ws: WebSocket):
                 # Allocate the physical spare piece for promotions.
                 promo_piece_name = game.allocate_promo_piece(moving_color, promotion_letter) if promotion_letter else ""
 
+                # Keep the server-side piece identity map in sync so new clients
+                # that connect mid-game receive the correct state.
+                game.update_piece_identity(
+                    from_sq=from_sq, to_sq=to_sq,
+                    piece_name=piece_name,
+                    captured_piece_name=captured_piece_name,
+                    rook_piece_name=rook_piece_name,
+                    promotion_letter=promotion_letter,
+                    promo_piece_name=promo_piece_name,
+                    castling_rook=castling_rook,
+                    ep_capture_sq=ep_capture_sq,
+                )
+
                 # robot_executing is True when the robot will physically carry out
                 # this move — the client uses this to keep the board locked until
                 # robot_idle arrives.
@@ -374,6 +453,7 @@ async def websocket_endpoint(ws: WebSocket):
                     "robot_executing": robot_executing,
                     "promo_piece_name": promo_piece_name,
                     "available_promotions": game.available_promotions(),
+                    "piece_identity": game.piece_identity,
                 })
 
                 # Detect and broadcast game-over conditions.
