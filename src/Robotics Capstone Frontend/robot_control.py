@@ -42,8 +42,18 @@ SERVICE_TYPE_EN_PASSANT = "interfaces/EnPassant"
 SERVICE_TYPE_CASTLE     = "interfaces/Castle"
 SERVICE_TYPE_PROMOTE    = "interfaces/Promote"
 
-# Maps UCI promotion letter → human-readable name for Promote.srv promote_piece field.
-_PROMO_NAMES = {"q": "queen", "r": "rook", "b": "bishop", "n": "knight"}
+# Physical storage squares (file, rank) for each spare promotion piece.
+# Rank is "WhitePromo" or "BlackPromo"; file identifies the specific piece.
+PROMO_PIECE_SQUARES: dict[str, tuple[str, str]] = {
+    'WhiteQueen2':  ('a', 'WhitePromo'),
+    'WhiteQueen3':  ('b', 'WhitePromo'),
+    'WhiteKnight3': ('g', 'WhitePromo'),
+    'WhiteKnight4': ('h', 'WhitePromo'),
+    'BlackQueen2':  ('a', 'BlackPromo'),
+    'BlackQueen3':  ('b', 'BlackPromo'),
+    'BlackKnight3': ('g', 'BlackPromo'),
+    'BlackKnight4': ('h', 'BlackPromo'),
+}
 
 # Seconds to wait for a service response — robot moves are slow.
 SERVICE_TIMEOUT = 120.0
@@ -240,6 +250,7 @@ class RobotController:
         piece_name: str = "",
         captured_piece_name: str = "",
         rook_piece_name: str = "",
+        promo_piece_name: str = "",
     ) -> None:
         """
         Orchestrate the physical move sequence without blocking the asyncio
@@ -268,7 +279,8 @@ class RobotController:
             await asyncio.to_thread(
                 self._execute_sync,
                 from_square, to_square, is_capture,
-                castling_rook, ep_capture_sq, promotion, piece_name, captured_piece_name, rook_piece_name,
+                castling_rook, ep_capture_sq, promotion,
+                piece_name, captured_piece_name, rook_piece_name, promo_piece_name,
             )
         except Exception:
             log.exception("Unhandled error during move %s → %s", from_square, to_square)
@@ -291,6 +303,7 @@ class RobotController:
         piece_name: str = "",
         captured_piece_name: str = "",
         rook_piece_name: str = "",
+        promo_piece_name: str = "",
     ) -> None:
         if castling_rook is not None:
             rook_from, rook_to = castling_rook
@@ -303,7 +316,7 @@ class RobotController:
             end_piece = captured_piece_name if is_capture else "empty"
             if is_capture and not end_piece:
                 end_piece = self._piece_name_at(to_square)
-            self._promote(from_square, to_square, piece_name, end_piece, promotion)
+            self._promote(from_square, to_square, piece_name, end_piece, promo_piece_name)
         elif is_capture:
             if not captured_piece_name:
                 captured_piece_name = self._piece_name_at(to_square)
@@ -471,16 +484,22 @@ class RobotController:
         to_sq: str,
         pawn_piece: str = "",
         end_piece: str = "empty",
-        promotion: str = "q",
+        promo_piece_name: str = "",
     ) -> bool:
-        """Call /chess/promote (Promote.srv)."""
+        """Call /chess/promote (Promote.srv).
+
+        promo_piece_name is the full ArUco marker name of the spare piece
+        (e.g. 'WhiteQueen2').  Its physical pickup location is looked up from
+        PROMO_PIECE_SQUARES so the chess driver can find it on the board.
+        """
         from_file, from_rank = _parse_square(from_sq)
         to_file,   to_rank   = _parse_square(to_sq)
         pawn = pawn_piece if pawn_piece else self._piece_name_at(from_sq)
-        promo_name = _PROMO_NAMES.get(promotion, promotion)
+        pickup = PROMO_PIECE_SQUARES.get(promo_piece_name, ("?", "?"))
         log.info(
-            "  [PROMOTE] %s → %s  pawn=%s  end_piece=%s  promote_to=%s",
-            from_sq.upper(), to_sq.upper(), pawn, end_piece, promo_name,
+            "  [PROMOTE] %s → %s  pawn=%s  end_piece=%s  promote_to=%s  pickup=%s%s",
+            from_sq.upper(), to_sq.upper(), pawn, end_piece,
+            promo_piece_name, pickup[0], pickup[1],
         )
         response = self._bridge.call_service(
             SERVICE_PROMOTE,
@@ -492,7 +511,7 @@ class RobotController:
                 "end_rank":      to_rank,
                 "start_piece":   pawn,
                 "end_piece":     end_piece,
-                "promote_piece": promo_name,
+                "promote_piece": promo_piece_name,
             },
         )
         ok = bool(response and response.get("success", False))
