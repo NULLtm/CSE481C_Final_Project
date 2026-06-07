@@ -399,7 +399,7 @@ class ChessDriver(Node):
         if self.remove_piece(response, request.start_file, request.start_rank, request.start_piece) is False:
             return response
 
-        if request.end_piece == 'empty':
+        if request.end_piece != 'empty':
             if self.remove_piece(response, request.end_file, request.end_rank, request.end_piece) is False:
                 return response
 
