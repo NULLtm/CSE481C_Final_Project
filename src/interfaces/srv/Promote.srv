@@ -7,6 +7,8 @@ string end_file
 string start_piece   # ArUco marker name of the piece being moved, e.g. "WhitePawn3"
 string end_piece     # 'empty' if the square you promote to is not taken rn
 string promote_piece
+string promo_rank
+string promo_file
 ---
 # Response (Server -> Client)
 string message

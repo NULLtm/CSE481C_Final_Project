@@ -79,7 +79,7 @@
       '16':
         length_mm: 20
         use_rgb_only: False
-        name: 'WhiteQueen1'
+        name: 'WhiteKing1'
         link: 'None'
       '17':
         length_mm: 20
@@ -99,7 +99,7 @@
       '20':
         length_mm: 20
         use_rgb_only: False
-        name: 'WhiteKing1'
+        name: 'WhiteQueen1'
         link: 'None'
       '21':
         length_mm: 20
@@ -320,6 +320,46 @@
         length_mm: 18
         use_rgb_only: False
         name: 'Rank7B'
+        link: 'None'
+      '65':
+        length_mm: 20
+        use_rgb_only: False
+        name: 'WhiteQueen2'
+        link: 'None'
+      '66':
+        length_mm: 20
+        use_rgb_only: False
+        name: 'WhiteQueen3'
+        link: 'None'
+      '67':
+        length_mm: 20
+        use_rgb_only: False
+        name: 'WhiteKnight3'
+        link: 'None'
+      '68':
+        length_mm: 20
+        use_rgb_only: False
+        name: 'WhiteKnight4'
+        link: 'None'
+      '69':
+        length_mm: 20
+        use_rgb_only: False
+        name: 'BlackQueen2'
+        link: 'None'
+      '70':
+        length_mm: 20
+        use_rgb_only: False
+        name: 'BlackQueen3'
+        link: 'None'
+      '71':
+        length_mm: 20
+        use_rgb_only: False
+        name: 'BlackKnight3'
+        link: 'None'
+      '72':
+        length_mm: 20
+        use_rgb_only: False
+        name: 'BlackKnight4'
         link: 'None'
       '200':
         length_mm: 14.0

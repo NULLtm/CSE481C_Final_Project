@@ -73,6 +73,9 @@ class ChessDriver(Node):
 
     FINGER_ADJUSTMENT_OFFSET = 0.0
 
+    MOVE_AWAY_FROM_TABLE_DISTANCE = -0.2
+    MOVE_AWAY_FROM_TABLE_ANGLE = -math.pi / 5.0
+
 
     def __init__(self):
         super().__init__('aruco_base_align_node')
@@ -255,12 +258,21 @@ class ChessDriver(Node):
             duration_sec=6.0
         )
 
-        self.force_reset_wrist()
-
         if not success:
             response.message = "Failed during arm reset."
             response.success = False
             return response
+
+        self.force_reset_wrist()
+
+        odd = 1
+        while self.is_a_rank_visible() is False:
+            self.get_logger().info('No ranks visible, backing away from table...')
+            if self.backup_from_table(odd) is False:
+                response.message = "Failed during back away from table."
+                response.success = False
+                return response
+            odd *= -1
 
         response.message = "Reset complete."
         response.success = True
@@ -284,11 +296,13 @@ class ChessDriver(Node):
         if self.remove_piece(response, request.start_file, request.start_rank, request.start_piece) is False:
             return response
 
-        if request.end_piece == '':
+        if request.end_piece == 'empty':
             if self.remove_piece(response, request.end_file, request.end_rank, request.end_piece) is False:
                 return response
-            
-        # TODO GO TO PROMO SQUARE AND MOVE IT TO CORRECT SQUARE
+
+        if self.move(response, request.promo_file, request.promo_rank, request.end_file, request.end_rank, request.promote_piece) is False:
+            return response
+
         response.message = f"Successfully promoted piece."
         response.success = True
         return response
@@ -345,6 +359,67 @@ class ChessDriver(Node):
             return False
         
         return self.gripper_reset_position(response)
+    
+    def backup_from_table(self, odd):
+        """
+        Rotates the mobile base 90 degrees, translates 10 cm, 
+        and rotates back to the original orientation.
+        """
+
+        self.get_logger().info("Executing backup maneuver: turn 90 deg, move 10 cm, turn back.")
+
+        # --- Step 1: Turn 90 degrees (pi/2 radians) ---
+        current_rot = self.current_joint_states.get('rotate_mobile_base', 0.0)
+        target_rot = current_rot + odd * self.MOVE_AWAY_FROM_TABLE_ANGLE 
+        
+        self.get_logger().info(f"Turning base to {target_rot:.3f} rad")
+        success1 = self.execute_trajectory(
+            ['rotate_mobile_base'],
+            [target_rot],
+            duration_sec=4.0
+        )
+        
+        if not success1:
+            self.get_logger().error("Backup Failed: Could not complete initial 90 degree turn.")
+            return False
+
+        time.sleep(0.5)
+
+        # --- Step 2: Move outward 10 cm (0.1 meters) ---
+        current_trans = self.current_joint_states.get('translate_mobile_base', 0.0)
+        target_trans = current_trans + odd * self.MOVE_AWAY_FROM_TABLE_DISTANCE
+        
+        self.get_logger().info(f"Translating base to {target_trans:.3f} m")
+        success2 = self.execute_trajectory(
+            ['translate_mobile_base'],
+            [target_trans],
+            duration_sec=3.0
+        )
+        
+        if not success2:
+            self.get_logger().error("Backup Failed: Could not complete translation.")
+            return False
+
+        time.sleep(0.5)
+
+        # --- Step 3: Turn back -90 degrees ---
+        # Re-fetch current rotation to account for any slight odometry drift during translation
+        current_rot2 = self.current_joint_states.get('rotate_mobile_base', 0.0)
+        target_rot_back = current_rot2 - odd * self.MOVE_AWAY_FROM_TABLE_ANGLE
+        
+        self.get_logger().info(f"Returning base rotation to {target_rot_back:.3f} rad")
+        success3 = self.execute_trajectory(
+            ['rotate_mobile_base'],
+            [target_rot_back],
+            duration_sec=4.0
+        )
+        
+        if not success3:
+            self.get_logger().error("Backup Failed: Could not rotate back to original heading.")
+            return False
+
+        self.get_logger().info("Successfully completed backup maneuver.")
+        return True
 
     
     def take_callback(self, request, response):
@@ -578,18 +653,21 @@ class ChessDriver(Node):
 
         file = "File" + target_file.upper()
 
-        if int(target_rank) >= 5:
-            file += "B"
-        else:
-            file += "W"
-
-        rank = "Rank" + target_rank + "W"
-
         off_by_one_rank_offset = 0.0
+        rank = ""
+        if target_rank == 'WhitePromo' or target_rank == 'BlackPromo':
+            off_by_one_rank_offset = self.ONE_RANK_DISTANCE / 2.0
+        else:
+            if int(target_rank) >= 5:
+                file += "B"
+            else:
+                file += "W"
 
-        if rank == "Rank8W":
-            rank = "Rank7W"
-            off_by_one_rank_offset = self.ONE_RANK_DISTANCE
+            rank = "Rank" + target_rank + "W"
+
+            if rank == "Rank8W":
+                rank = "Rank7W"
+                off_by_one_rank_offset = self.ONE_RANK_DISTANCE
         
         self.get_logger().info(f"Move to Target Rank: '{target_rank}' | Target File: '{target_file}'")
 
@@ -724,26 +802,14 @@ class ChessDriver(Node):
         
         return file_index
     
-    def find_closest_visible_rank(self, target_rank_str):
-        """
-        Polls the TF buffer for 'Rank1' through 'Rank8'.
-        Returns the name of the visible rank that is numerically closest to the target.
-        """
-        target_num = int(re.search(r'\d+', target_rank_str).group())
-        
-        visible_ranks = []
-        for i in range(1, 9):
-            test_frame = f"Rank{i}"
-            # Use a tiny timeout just to check if it exists
+    def is_a_rank_visible(self):
+        for i in (5, 4, 6, 3):
+            test_frame = f"Rank{i}W"
+            self.get_logger().info(f'Testing if {test_frame} is visible...')
             if self.get_marker_transform(test_frame, "base_link") is not None:
-                visible_ranks.append(i)
-                
-        if not visible_ranks:
-            return None
-            
-        # Find the rank number that is closest to our target number
-        closest_num = min(visible_ranks, key=lambda x: abs(x - target_num))
-        return f"Rank{closest_num}"
+                self.get_logger().info(f'{test_frame} was found.')
+                return True
+        return False
 
 
 def main(args=None):
