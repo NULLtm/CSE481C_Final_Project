@@ -78,12 +78,53 @@ class ConnectionManager:
 class GameState:
     """Single source of truth for the chess board."""
 
+    # ---------------------------------------------------------------------------
+    # Spare promotion pieces — keyed by color ('w'/'b') then piece type ('q'/'n').
+    # Ordered: first entry is used first.
+    # Physical storage locations (file, rank) are defined in robot_control.py.
+    # 'r' and 'b' are intentionally absent — no spare rooks/bishops available.
+    # ---------------------------------------------------------------------------
+    _INITIAL_PROMO_POOL: dict[str, dict[str, list[str]]] = {
+        'w': {
+            'q': ['WhiteQueen2', 'WhiteQueen3'],
+            'n': ['WhiteKnight3', 'WhiteKnight4'],
+        },
+        'b': {
+            'q': ['BlackQueen2', 'BlackQueen3'],
+            'n': ['BlackKnight3', 'BlackKnight4'],
+        },
+    }
+
     def __init__(self) -> None:
         self.board = chess.Board()
+        self._reset_promo_pool()
+
+    def _reset_promo_pool(self) -> None:
+        import copy
+        self._promo_pool: dict[str, dict[str, list[str]]] = copy.deepcopy(self._INITIAL_PROMO_POOL)
 
     @property
     def fen(self) -> str:
         return self.board.fen()
+
+    def available_promotions(self) -> dict[str, dict[str, bool]]:
+        """Return {color: {piece_type: available}} for all colors."""
+        return {
+            color: {pt: len(pool) > 0 for pt, pool in by_type.items()}
+            for color, by_type in self._promo_pool.items()
+        }
+
+    def can_promote(self, color: str, piece_type: str) -> bool:
+        return bool(self._promo_pool.get(color, {}).get(piece_type))
+
+    def allocate_promo_piece(self, color: str, piece_type: str) -> str | None:
+        """Pop and return the next available spare piece name, or None if exhausted."""
+        pool = self._promo_pool.get(color, {}).get(piece_type, [])
+        if not pool:
+            return None
+        name = pool.pop(0)
+        log.info("Allocated promotion piece: %s  (remaining %s/%s: %d)", name, color, piece_type, len(pool))
+        return name
 
     def apply_move(self, uci: str) -> chess.Move | None:
         """
@@ -220,7 +261,11 @@ async def reset_stretch():
 async def reset_game():
     """Reset the board to the starting position and notify all clients."""
     game.board.reset()
-    await manager.broadcast({"fen": game.fen, "event": "reset"})
+    game._reset_promo_pool()
+    await manager.broadcast({
+        "fen": game.fen, "event": "reset",
+        "available_promotions": game.available_promotions(),
+    })
     log.info("Game reset.")
     return {"status": "ok", "fen": game.fen}
 
@@ -234,7 +279,10 @@ async def websocket_endpoint(ws: WebSocket):
     await manager.connect(ws)
 
     # Send the current board state immediately on connection.
-    await ws.send_text(json.dumps({"fen": game.fen, "event": "sync"}))
+    await ws.send_text(json.dumps({
+        "fen": game.fen, "event": "sync",
+        "available_promotions": game.available_promotions(),
+    }))
 
     try:
         while True:
@@ -270,6 +318,18 @@ async def websocket_endpoint(ws: WebSocket):
             else:
                 promotion_letter = ""
 
+            # Capture moving color BEFORE applying the move (board.turn flips after push).
+            moving_color = 'w' if game.board.turn == chess.WHITE else 'b'
+
+            # Reject promotion early if no spare pieces are available for that type.
+            if promotion_letter and not game.can_promote(moving_color, promotion_letter):
+                log.warning("Promotion rejected — no spare %s/%s pieces left.", moving_color, promotion_letter)
+                await ws.send_text(json.dumps({
+                    "fen": game.fen, "event": "invalid", "uci": uci,
+                    "available_promotions": game.available_promotions(),
+                }))
+                continue
+
             # --- Detect special move types on the PRE-PUSH board state ---
             castling_rook = ep_capture_sq = None
             try:
@@ -298,6 +358,9 @@ async def websocket_endpoint(ws: WebSocket):
             move = game.apply_move(uci)
 
             if move is not None:
+                # Allocate the physical spare piece for promotions.
+                promo_piece_name = game.allocate_promo_piece(moving_color, promotion_letter) if promotion_letter else ""
+
                 # robot_executing is True when the robot will physically carry out
                 # this move — the client uses this to keep the board locked until
                 # robot_idle arrives.
@@ -308,6 +371,8 @@ async def websocket_endpoint(ws: WebSocket):
                 await manager.broadcast({
                     "fen": game.fen, "event": "move", "uci": uci,
                     "robot_executing": robot_executing,
+                    "promo_piece_name": promo_piece_name,
+                    "available_promotions": game.available_promotions(),
                 })
 
                 # Detect and broadcast game-over conditions.
@@ -343,12 +408,14 @@ async def websocket_endpoint(ws: WebSocket):
                             promo=promotion_letter,
                             pn=piece_name, cpn=captured_piece_name,
                             rpn=rook_piece_name,
+                            ppn=promo_piece_name,
                         ):
                             await robot.execute_move(
                                 from_square=fsq, to_square=tsq, is_capture=cap,
                                 castling_rook=cr, ep_capture_sq=ep,
                                 promotion=promo, piece_name=pn,
                                 captured_piece_name=cpn, rook_piece_name=rpn,
+                                promo_piece_name=ppn,
                             )
                             await manager.broadcast({"event": "robot_idle"})
 

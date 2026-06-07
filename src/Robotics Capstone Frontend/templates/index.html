@@ -544,8 +544,14 @@
       -webkit-tap-highlight-color: transparent;
     }
 
-    .promo-btn:hover  { background: var(--highlight); border-color: var(--highlight); }
-    .promo-btn:active { transform: scale(0.95); }
+    .promo-btn:hover:not(:disabled)  { background: var(--highlight); border-color: var(--highlight); }
+    .promo-btn:active:not(:disabled) { transform: scale(0.95); }
+    .promo-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.06);
+    }
 
     /* ------------------------------------------------------------------ */
     /* Robot-Busy Overlay                                                  */
@@ -756,6 +762,27 @@
   let moveNumber = 1;
   let pendingMove = null; // cleared on every server response; guards against stale state
 
+  // Tracks which promotion piece types still have spare physical pieces,
+  // keyed by color ('w'/'b') then piece type ('q'/'n').
+  // Updated from server on every move, reset, and initial sync.
+  // 'r' and 'b' are never available (no spare rooks/bishops).
+  let availablePromotions = { w: { q: true, n: true }, b: { q: true, n: true } };
+
+  function updatePromoButtons() {
+    const color = chess.turn();                          // 'w' or 'b'
+    const pool  = (availablePromotions[color]) || {};
+    $('#promoChoices .promo-btn').each(function () {
+      const piece = $(this).data('piece');
+      if (piece === 'r' || piece === 'b') {
+        $(this).prop('disabled', true).attr('title', 'No spare pieces available');
+      } else {
+        const ok = pool[piece] !== false;
+        $(this).prop('disabled', !ok)
+               .attr('title', ok ? '' : 'All spare pieces used');
+      }
+    });
+  }
+
   // Tracks whether each player's moves should be physically executed by the robot.
   // false = human only (digital board updates, robot stays still)
   // true  = robot executes the move on the physical board
@@ -815,7 +842,16 @@
         const from  = msg.uci.slice(0, 2);
         const to    = msg.uci.slice(2, 4);
         const promo = msg.uci.length > 4 ? msg.uci[4] : '';
-        updatePieceIdentityOnMove(from, to, promo);
+        updatePieceIdentityOnMove(from, to, promo, msg.promo_piece_name || '');
+      }
+      // Sync available promotions from server on any message that carries them.
+      // Server sends { w: {q,n}, b: {q,n} } — do a shallow merge per color.
+      if (msg.available_promotions) {
+        for (const color of ['w', 'b']) {
+          if (msg.available_promotions[color]) {
+            Object.assign(availablePromotions[color], msg.available_promotions[color]);
+          }
+        }
       }
       // pendingMove is no longer needed for identity — clear it regardless.
       pendingMove = null;
@@ -851,6 +887,7 @@
         hideGameOver();
         resetPieceIdentity();
         updatePieceLabels();
+        availablePromotions = { w: { q: true, n: true }, b: { q: true, n: true } };
         logEvent('Game reset.');
       } else if (msg.event === 'sync') {
         isBoardLocked = false;
@@ -925,16 +962,18 @@
 
   // Update pieceIdentity for a move BEFORE chess.js pushes it, so we still
   // have access to the pre-move board state via chess.moves().
-  function updatePieceIdentityOnMove(from, to, promotion) {
+  // promoPieceName: the ArUco name of the spare piece used for promotion
+  //   (e.g. 'WhiteQueen2'), provided by the server in msg.promo_piece_name.
+  function updatePieceIdentityOnMove(from, to, promotion, promoPieceName) {
     const moves = chess.moves({ verbose: true });
     const moveObj = moves.find(m =>
       m.from === from && m.to === to && (!promotion || m.promotion === promotion)
     );
 
     if (!moveObj) {
-      // Fallback: just relocate the piece
+      // Fallback: just relocate the piece (or place spare piece for promotions)
       if (pieceIdentity[from]) {
-        pieceIdentity[to] = pieceIdentity[from];
+        pieceIdentity[to] = (promotion && promoPieceName) ? promoPieceName : pieceIdentity[from];
         delete pieceIdentity[from];
       }
       return;
@@ -952,9 +991,10 @@
       }
     }
 
-    // Relocate the moving piece
+    // Relocate the moving piece.
+    // For promotions: the pawn leaves and the spare piece takes its place at `to`.
     if (pieceIdentity[from]) {
-      pieceIdentity[to] = pieceIdentity[from];
+      pieceIdentity[to] = (promotion && promoPieceName) ? promoPieceName : pieceIdentity[from];
       delete pieceIdentity[from];
     }
 
@@ -1326,8 +1366,10 @@
 
   // Show the promotion-piece picker dialog then send the move.
   function requestPromotion(from, to) {
+    updatePromoButtons();
     $('#promoModal').show();
     $('#promoChoices .promo-btn').off('click').on('click', function () {
+      if ($(this).prop('disabled')) return;
       $('#promoModal').hide();
       sendMove(from, to, $(this).data('piece'));
     });
