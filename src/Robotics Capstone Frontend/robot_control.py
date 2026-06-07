@@ -512,6 +512,8 @@ class RobotController:
                 "start_piece":   pawn,
                 "end_piece":     end_piece,
                 "promote_piece": promo_piece_name,
+                "promo_file":    pickup[0],
+                "promo_rank":    pickup[1],
             },
         )
         ok = bool(response and response.get("success", False))

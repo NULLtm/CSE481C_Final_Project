@@ -1401,8 +1401,8 @@
     text = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').trim();
 
     // Castling
-    const isQueenside = /queen.?side|long\s*castl|o\s*o\s*o/.test(text);
-    const isKingside  = !isQueenside && /castl|king.?side|o\s*o/.test(text);
+    const isQueenside = /queen.?side|long\s*castl|\bo\s*o\s*o\b/.test(text);
+    const isKingside  = !isQueenside && /castl|king.?side|\bo\s*o\b/.test(text);
     if (isQueenside) return resolveSAN('O-O-O');
     if (isKingside)  return resolveSAN('O-O');
 
