@@ -45,7 +45,7 @@ class ChessDriver(Node):
 
     # TODO Robot slowly approaches the table over time and also starts to rotate slightly due to droop of the arm
 
-    GRIPPER_OPEN = 0.12
+    GRIPPER_OPEN = 0.18
     GRIPPER_CLOSED = -0.05
 
     LIFT_TOP = 1.1
@@ -66,20 +66,20 @@ class ChessDriver(Node):
 
     ONE_RANK_DISTANCE = 0.071
 
-    RANK_ADJUSTMENT_OFFSET = 0.001
+    RANK_ADJUSTMENT_OFFSET = -0.005
     FILE_ADJUSTMENT_OFFSET = 0.034
 
     RANK_ERROR_ALLOWED = 0.005
-    FILE_ERROR_ALLOWED = 0.01
+    FILE_ERROR_ALLOWED = 0.005
 
     FINGER_ADJUSTMENT_OFFSET = 0.0
 
     MOVE_AWAY_FROM_TABLE_DISTANCE = -0.2
     MOVE_AWAY_FROM_TABLE_ANGLE = -math.pi / 5.0
 
-    SAFE_TABLE_CLEARANCE = 0.15
-    HEADING_ERROR_ALLOWED = 0.04
-    HEADING_OFFSET = 0.1
+    SAFE_TABLE_CLEARANCE = 0.22
+    HEADING_ERROR_ALLOWED = 0.03
+    HEADING_OFFSET = 0.05
 
 
     def __init__(self):

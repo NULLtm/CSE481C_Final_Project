@@ -29,6 +29,9 @@ LAUNCH WEB INTERFACE:
 cd ~/aaso_ws/src/front-back-connection-test1
 python3 app.py
 
+HOST THE WEBSITE AFTER RUNNING EVERYTHING
+ngrok http https://0.0.0.0:8000
+
 Go to the website provided and enjoy.
 
 ------------------------------------
