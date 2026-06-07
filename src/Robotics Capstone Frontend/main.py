@@ -95,7 +95,8 @@ class GameState:
         except ValueError:
             log.warning("Malformed UCI string: %s", uci)
             return None
-
+        
+        log.info(f'legal moves: {self.board.legal_moves}')
         if move in self.board.legal_moves:
             # Capture detection must happen before pushing the move.
             self._last_is_capture = self.board.is_capture(move)

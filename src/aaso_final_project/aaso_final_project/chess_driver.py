@@ -34,15 +34,16 @@ from std_srvs.srv import Trigger
 
 class ChessDriver(Node):
 
-    # TODO add castling, promotion, and en passant
+    # TODO add promotion
     # TODO Make lift grab height use aruco markers?
     # TODO Look for speed ups?
     # TODO Make a system for the robot backing up from the table if needed
     # TODO If the robot cannot see any ranks for rank adjustment then backup?
     # TODO For file/rank adjustment use other rank / file markers with an offset?
-    # TODO Bug with Arda's frontend? -- if you click a piece to a non-valid square it moves the piece indicator making the actual move using piece=unknown
 
     # Constants -- to be tuned depending
+
+    # TODO Robot slowly approaches the table over time and also starts to rotate slightly due to droop of the arm
 
     GRIPPER_OPEN = 0.12
     GRIPPER_CLOSED = -0.05
@@ -75,6 +76,10 @@ class ChessDriver(Node):
 
     MOVE_AWAY_FROM_TABLE_DISTANCE = -0.2
     MOVE_AWAY_FROM_TABLE_ANGLE = -math.pi / 5.0
+
+    SAFE_TABLE_CLEARANCE = 0.15
+    HEADING_ERROR_ALLOWED = 0.04
+    HEADING_OFFSET = 0.1
 
 
     def __init__(self):
@@ -185,6 +190,57 @@ class ChessDriver(Node):
         for name, position in zip(msg.name, msg.position):
             self.current_joint_states[name] = position
 
+    def get_yaw_from_quaternion(self, q):
+        """
+        Converts a geometry_msgs Quaternion to yaw (rotation around Z-axis) in radians.
+        """
+        siny_cosp = 2 * (q.w * q.z + q.x * q.y)
+        cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
+        return math.atan2(siny_cosp, cosy_cosp)
+    
+    def align_heading_to_table(self):
+        """
+        Reads the orientation of a visible rank marker and rotates the base to perfectly square up.
+        """
+        self.get_logger().info("Squaring up base heading with the table...")
+        
+        # We give it a couple of attempts to fine-tune, similar to your rank alignment
+        for attempt in range(3):
+            time.sleep(1.0) # Let camera and TF settle
+            
+            marker_t = self.get_visible_rank_transform()
+            if marker_t is None:
+                self.get_logger().error("Lost sight of markers. Cannot align heading.")
+                return False
+                
+            # Extract the yaw error from the marker's orientation
+            q = marker_t.transform.rotation
+            yaw_error = self.get_yaw_from_quaternion(q) + math.pi / 2 + self.HEADING_OFFSET
+            
+            # Note: Depending on exactly how your ArUco markers are defined in the TF tree, 
+            # you MIGHT need to add or subtract math.pi/2 to yaw_error if the robot 
+            # tries to align sideways instead of facing the table.
+            
+            self.get_logger().info(f"Heading error is {yaw_error:.3f} rad.")
+            
+            if abs(yaw_error) < self.HEADING_ERROR_ALLOWED:
+                self.get_logger().info("Base is successfully flush with the table!")
+                return True
+                
+            # Rotate the base to correct the error
+            current_rot = self.current_joint_states.get('rotate_mobile_base', 0.0)
+            target_rot = current_rot + yaw_error
+            
+            self.get_logger().info(f"Correcting heading by rotating base to {target_rot:.3f} rad")
+            self.execute_trajectory(
+                ['rotate_mobile_base'],
+                [target_rot],
+                duration_sec=3.0
+            )
+            
+        self.get_logger().warning("Failed to perfectly align heading within max attempts, but close enough.")
+        return True # Return true anyway so the sequence doesn't entirely fail
+
     def execute_trajectory(self, joint_names, positions, duration_sec):
         """
         Helper method to build and send a FollowJointTrajectory goal.
@@ -243,6 +299,19 @@ class ChessDriver(Node):
         except TransformException as ex:
             self.get_logger().error(f"TF Error: {ex}")
             return None
+    
+    def get_visible_rank_transform(self):
+        """
+        Returns the transform of the first visible rank marker, or None if none are seen.
+        """
+        # Using your specific non-sequential index order
+        for i in (5, 4, 6, 3, 7, 2, 1):
+            test_frame = f"Rank{i}W"
+            t = self.get_marker_transform(test_frame, "base_link")
+            if t is not None:
+                self.get_logger().info(f'{test_frame} was found.')
+                return t
+        return None
 
     # =========================================================
     # Main Service Routine
@@ -265,16 +334,50 @@ class ChessDriver(Node):
 
         self.force_reset_wrist()
 
+        # Step 2: Handle Table Clearance
+        marker_t = self.get_visible_rank_transform()
         odd = 1
-        while self.is_a_rank_visible() is False:
-            self.get_logger().info('No ranks visible, backing away from table...')
+        
+        # If we are totally blind, back up in standard increments until we see the table
+        while marker_t is None:
+            self.get_logger().info('No ranks visible, blindly backing away from table...')
             if self.backup_from_table(odd) is False:
-                response.message = "Failed during back away from table."
+                response.message = "Failed during blind back away."
                 response.success = False
                 return response
             odd *= -1
+            marker_t = self.get_visible_rank_transform()
 
-        response.message = "Reset complete."
+        # Now that we see a marker, calculate exactly how much further we need to go
+        # The perpendicular distance to the table is roughly the Y-axis value of the marker
+        current_y_dist = abs(marker_t.transform.translation.y)
+        delta_dist = self.SAFE_TABLE_CLEARANCE - current_y_dist
+        
+        if delta_dist > 0.02: # Only trigger if we are more than 2cm too close
+            self.get_logger().info(f"Currently {current_y_dist:.3f}m from table. Need {self.SAFE_TABLE_CLEARANCE}m.")
+            
+            # Apply trigonometry: hypotenuse = opposite / sin(theta)
+            calc_trans = delta_dist / math.sin(abs(self.MOVE_AWAY_FROM_TABLE_ANGLE))
+            
+            # Match the sign of your standard distance constant to ensure we move backward
+            calc_trans = math.copysign(calc_trans, self.MOVE_AWAY_FROM_TABLE_DISTANCE)
+            
+            self.get_logger().info(f"Calculated hypotenuse translation: {calc_trans:.3f}m")
+            
+            if self.backup_from_table(odd=1, calculated_distance=calc_trans) is False:
+                response.message = "Failed during precision back away."
+                response.success = False
+                return response
+        else:
+            self.get_logger().info("Robot is already at a safe distance from the table.")
+
+        # --- NEW: Step 3: Square up the heading ---
+        if not self.align_heading_to_table():
+             response.message = "Reset complete, but failed to square up heading."
+             response.success = False
+             return response
+
+        response.message = "Reset and alignment complete."
         response.success = True
         return response
 
@@ -360,62 +463,50 @@ class ChessDriver(Node):
         
         return self.gripper_reset_position(response)
     
-    def backup_from_table(self, odd):
+    def backup_from_table(self, odd, calculated_distance=None):
         """
-        Rotates the mobile base 90 degrees, translates 10 cm, 
-        and rotates back to the original orientation.
+        Rotates the mobile base, translates, and rotates back.
+        If calculated_distance is provided, it uses that instead of the standard distance.
         """
+        self.get_logger().info("Executing backup maneuver...")
 
-        self.get_logger().info("Executing backup maneuver: turn 90 deg, move 10 cm, turn back.")
-
-        # --- Step 1: Turn 90 degrees (pi/2 radians) ---
+        # --- Step 1: Turn ---
         current_rot = self.current_joint_states.get('rotate_mobile_base', 0.0)
         target_rot = current_rot + odd * self.MOVE_AWAY_FROM_TABLE_ANGLE 
         
         self.get_logger().info(f"Turning base to {target_rot:.3f} rad")
-        success1 = self.execute_trajectory(
-            ['rotate_mobile_base'],
-            [target_rot],
-            duration_sec=4.0
-        )
+        success1 = self.execute_trajectory(['rotate_mobile_base'], [target_rot], duration_sec=4.0)
         
         if not success1:
-            self.get_logger().error("Backup Failed: Could not complete initial 90 degree turn.")
             return False
 
         time.sleep(0.5)
 
-        # --- Step 2: Move outward 10 cm (0.1 meters) ---
+        # --- Step 2: Translate ---
         current_trans = self.current_joint_states.get('translate_mobile_base', 0.0)
-        target_trans = current_trans + odd * self.MOVE_AWAY_FROM_TABLE_DISTANCE
+        
+        # USE CALCULATED DISTANCE IF PROVIDED
+        if calculated_distance is not None:
+            target_trans = current_trans + odd * calculated_distance
+        else:
+            target_trans = current_trans + odd * self.MOVE_AWAY_FROM_TABLE_DISTANCE
         
         self.get_logger().info(f"Translating base to {target_trans:.3f} m")
-        success2 = self.execute_trajectory(
-            ['translate_mobile_base'],
-            [target_trans],
-            duration_sec=3.0
-        )
+        success2 = self.execute_trajectory(['translate_mobile_base'], [target_trans], duration_sec=3.0)
         
         if not success2:
-            self.get_logger().error("Backup Failed: Could not complete translation.")
             return False
 
         time.sleep(0.5)
 
-        # --- Step 3: Turn back -90 degrees ---
-        # Re-fetch current rotation to account for any slight odometry drift during translation
+        # --- Step 3: Turn back ---
         current_rot2 = self.current_joint_states.get('rotate_mobile_base', 0.0)
         target_rot_back = current_rot2 - odd * self.MOVE_AWAY_FROM_TABLE_ANGLE
         
         self.get_logger().info(f"Returning base rotation to {target_rot_back:.3f} rad")
-        success3 = self.execute_trajectory(
-            ['rotate_mobile_base'],
-            [target_rot_back],
-            duration_sec=4.0
-        )
+        success3 = self.execute_trajectory(['rotate_mobile_base'], [target_rot_back], duration_sec=4.0)
         
         if not success3:
-            self.get_logger().error("Backup Failed: Could not rotate back to original heading.")
             return False
 
         self.get_logger().info("Successfully completed backup maneuver.")
@@ -515,7 +606,7 @@ class ChessDriver(Node):
     def force_reset_wrist(self):
         success = False
         self.get_logger().info('Force reset wrist...')
-        for atempts in range(6):
+        for atempts in range(15):
             cur = self.get_wrist_position()
 
             self.get_logger().info(f'Current wrist position: {cur}')
@@ -530,7 +621,7 @@ class ChessDriver(Node):
             duration_sec=6.0
             )
 
-            time.sleep(2)
+            time.sleep(1)
 
         return success
 
