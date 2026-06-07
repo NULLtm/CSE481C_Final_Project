@@ -587,20 +587,7 @@
     /* Piece Identity Labels                                               */
     /* ------------------------------------------------------------------ */
     .piece-label {
-      position: absolute;
-      bottom: 3px;
-      right: 3px;
-      font-size: 0.52rem;
-      font-weight: 800;
-      color: rgba(255, 255, 255, 0.95);
-      text-shadow:
-        0 0 3px rgba(0,0,0,1),
-        0 0 6px rgba(0,0,0,0.8),
-        1px 1px 0 rgba(0,0,0,0.9);
-      pointer-events: none;
-      z-index: 10;
-      line-height: 1;
-      letter-spacing: 0.01em;
+      display: none;
     }
 
     /* ------------------------------------------------------------------ */
@@ -727,6 +714,7 @@
     <div class="controls">
       <button class="std-btn btn-secondary" id="btnFlip">Flip Board</button>
       <button class="std-btn btn-primary"   id="btnReset">New Game</button>
+      <button class="std-btn btn-secondary" id="btnResetStretch">Reset Stretch</button>
     </div>
   </div>
 
@@ -766,6 +754,7 @@
   let currentMode = 'select'; // 'select' | 'voice'
   let selectedSquare = null;
   let moveNumber = 1;
+  let pendingMove = null; // cleared on every server response; guards against stale state
 
   // Tracks whether each player's moves should be physically executed by the robot.
   // false = human only (digital board updates, robot stays still)
@@ -817,9 +806,19 @@
       let msg;
       try { msg = JSON.parse(evt.data); } catch { return; }
 
-      // Unlock board upon receiving any valid server response
-      isBoardLocked = false;
-      $('#boardOverlay').removeClass('active'); 
+      // ---------------------------------------------------------------
+      // Update piece identity BEFORE loading the new FEN so chess.js
+      // still reflects the pre-move board when we call chess.moves().
+      // This runs on ALL connected clients, not just the one that moved.
+      // ---------------------------------------------------------------
+      if (msg.event === 'move' && msg.uci) {
+        const from  = msg.uci.slice(0, 2);
+        const to    = msg.uci.slice(2, 4);
+        const promo = msg.uci.length > 4 ? msg.uci[4] : '';
+        updatePieceIdentityOnMove(from, to, promo);
+      }
+      // pendingMove is no longer needed for identity — clear it regardless.
+      pendingMove = null;
 
       if (msg.fen) {
         board.position(msg.fen, false); // false = instant snap to new FEN
@@ -829,12 +828,23 @@
       }
 
       if (msg.event === 'invalid') {
+        // Invalid move — unlock immediately, identity map unchanged.
+        isBoardLocked = false;
+        $('#boardOverlay').removeClass('active');
         clearSelection();
         setVoiceResult(`Could not play "${msg.uci}". Try again.`, 'error');
       } else if (msg.event === 'move' && msg.uci) {
+        // Only unlock if the robot is NOT about to execute this move physically.
+        // If robot_executing, stay locked until 'robot_idle' arrives.
+        if (!msg.robot_executing) {
+          isBoardLocked = false;
+          $('#boardOverlay').removeClass('active');
+        }
         logMove(msg.uci);
         clearSelection();
       } else if (msg.event === 'reset') {
+        isBoardLocked = false;
+        $('#boardOverlay').removeClass('active');
         $('#moveLog').empty();
         moveNumber = 1;
         clearSelection();
@@ -843,11 +853,16 @@
         updatePieceLabels();
         logEvent('Game reset.');
       } else if (msg.event === 'sync') {
+        isBoardLocked = false;
+        $('#boardOverlay').removeClass('active');
         logEvent('Board synchronised.');
       } else if (msg.event === 'robot_busy') {
         $('#robotBusyOverlay').show();
         logEvent('Robot executing move…');
       } else if (msg.event === 'robot_idle') {
+        // Robot finished — now safe to unlock the board.
+        isBoardLocked = false;
+        $('#boardOverlay').removeClass('active');
         $('#robotBusyOverlay').hide();
         logEvent('Robot ready.');
       } else if (msg.event === 'game_over' && msg.reason) {
@@ -983,14 +998,23 @@
         }
       }
 
-      // Update piece identity tracking and refresh board labels.
-      updatePieceIdentityOnMove(from, to, promotion);
-      updatePieceLabels();
+      // For castling, also look up the rook's name from pieceIdentity while we
+      // still have the pre-move state.  Kingside rook is on the h-file, queenside
+      // on the a-file — same rank as the king.
+      let rookPieceName = '';
+      if (moveObj) {
+        if (moveObj.flags.includes('k')) {          // kingside castle
+          rookPieceName = pieceIdentity['h' + from[1]] || '';
+        } else if (moveObj.flags.includes('q')) {   // queenside castle
+          rookPieceName = pieceIdentity['a' + from[1]] || '';
+        }
+      }
 
       isBoardLocked = true;
       $('#boardOverlay').addClass('active');
       const msg = { from, to, robot: isRobotMove, piece: pieceName, captured_piece: capturedPieceName };
-      if (promotion) msg.promotion = promotion;
+      if (promotion)     msg.promotion  = promotion;
+      if (rookPieceName) msg.rook_piece = rookPieceName;
       socket.send(JSON.stringify(msg));
     }
   }
@@ -1392,6 +1416,14 @@
   // Button handlers
   // =========================================================================
   $('#btnFlip').on('click', () => board.flip());
+
+  $('#btnResetStretch').on('click', () => {
+    if (!confirm('Send the Stretch robot to its home position?')) return;
+    fetch('/reset_stretch', { method: 'POST' })
+      .then(r => r.json())
+      .then(() => logEvent('Stretch reset requested.'))
+      .catch(() => logEvent('Reset Stretch request failed.'));
+  });
 
   $('#btnReset').on('click', () => {
     if (!confirm('Start a new game? The current game will be lost.')) return;
