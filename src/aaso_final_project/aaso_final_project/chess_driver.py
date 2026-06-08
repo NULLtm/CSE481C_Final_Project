@@ -40,6 +40,8 @@ class ChessDriver(Node):
     # TODO switch the force reset wrist to use aruco markers instead of hitting 0.0 + error?
     # TODO Robot slowly approaches the table over time and also starts to rotate slightly due to droop of the arm
 
+    # TODO make the gripping angle use aruco markers as well
+
 
     # Constants -- to be tuned depending
     GRIPPER_OPEN = 0.18
@@ -48,7 +50,7 @@ class ChessDriver(Node):
     LIFT_TOP = 1.1
     LIFT_PICKUP_HEIGHT = 0.97
     LIFT_DROP_HEIGHT = 0.965
-    LIFT_ADJUST_HEIGHT = 1.03
+    LIFT_ADJUST_HEIGHT = 1.05
 
     WRIST_YAW_DISCARD = 0.0
     WRIST_YAW_NORMAL = math.pi
@@ -68,17 +70,17 @@ class ChessDriver(Node):
     FILE_ADJUSTMENT_OFFSET = 0.034
 
     RANK_ERROR_ALLOWED = 0.005
-    FILE_ERROR_ALLOWED = 0.005
+    FILE_ERROR_ALLOWED = 0.007
 
     FINGER_ADJUSTMENT_OFFSET = 0.0
 
     MOVE_AWAY_FROM_TABLE_DISTANCE = -0.2
     MOVE_AWAY_FROM_TABLE_ANGLE = -math.pi / 5.0
 
-    SAFE_TABLE_CLEARANCE = 0.22
+    SAFE_TABLE_CLEARANCE = 0.19
     TABLE_DISTANCE_ERROR_ALLOWED = 0.02
     HEADING_ERROR_ALLOWED = 0.03
-    HEADING_OFFSET = 0.05
+    HEADING_OFFSET = 0.1 # larger = more to the right?
 
 
     def __init__(self):
@@ -391,7 +393,7 @@ class ChessDriver(Node):
             t = self.tf_buffer.lookup_transform(
                 robot_frame,
                 marker_frame,
-                rclpy.time.Time(),
+                self.get_clock().now(),
                 rclpy.duration.Duration(seconds=2.0)
             )
             return t
@@ -780,7 +782,7 @@ class ChessDriver(Node):
 
         if self.align_heading_to_table(response) is False:
             # if heading adjustment fails, try align to table
-            if self.align_to_table(response) is False:
+            if self.align_to_table(response) is False or self.align_heading_to_table(response) is False:
                 return False
             
         self.get_logger().info(f"Rank adjustment...")
@@ -827,13 +829,16 @@ class ChessDriver(Node):
             return self.fail(response, "Failed to precisely align base to rank within iterations.")
         
         self.previousRank = int(target_rank)
+
+        if self.align_heading_to_table(response) is False:
+            return False
         
         # --- ARM EXTENSION LOOP (FILE) ---
         arm_aligned = False
 
         # Heuristic first
         index = self.get_file_index(file)
-        self.execute_trajectory(['wrist_extension'], [(index + 0.1) * self.ONE_RANK_DISTANCE], duration_sec=5.0)
+        self.execute_trajectory(['wrist_extension'], [(index + 1) * self.ONE_FILE_DISTANCE], duration_sec=5.0)
 
         time.sleep(1)
         
@@ -856,7 +861,7 @@ class ChessDriver(Node):
         # Determine the file suffix so we can accurately look up fallback names
         
         for attempt in range(5):
-            time.sleep(1)
+            time.sleep(2)
             
             t = None
             found_letter = None
@@ -876,6 +881,8 @@ class ChessDriver(Node):
             found_index = ord(found_letter) - ord('A')
             # TODO This might be the opposite direction
             distance_offset = (target_index - found_index) * self.ONE_FILE_DISTANCE
+
+            self.get_logger().info(f'distance offset for found file is {distance_offset}')
 
             # 4. Add the calculated offset to the normal error
             error_y = t.transform.translation.y + self.FILE_ADJUSTMENT_OFFSET + distance_offset
