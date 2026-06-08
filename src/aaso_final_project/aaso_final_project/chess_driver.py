@@ -40,11 +40,12 @@ class ChessDriver(Node):
     # TODO Make a system for the robot backing up from the table if needed
     # TODO If the robot cannot see any ranks for rank adjustment then backup?
     # TODO For file/rank adjustment use other rank / file markers with an offset?
-
-    # Constants -- to be tuned depending
-
+    # TODO detect and auto align to the table if needed during moving
+    # TODO switch the force reset wrist to use aruco markers instead of hitting 0.0 + error?
     # TODO Robot slowly approaches the table over time and also starts to rotate slightly due to droop of the arm
 
+
+    # Constants -- to be tuned depending
     GRIPPER_OPEN = 0.18
     GRIPPER_CLOSED = -0.05
 
@@ -78,6 +79,7 @@ class ChessDriver(Node):
     MOVE_AWAY_FROM_TABLE_ANGLE = -math.pi / 5.0
 
     SAFE_TABLE_CLEARANCE = 0.22
+    TABLE_DISTANCE_ERROR_ALLOWED = 0.02
     HEADING_ERROR_ALLOWED = 0.03
     HEADING_OFFSET = 0.05
 
@@ -161,9 +163,104 @@ class ChessDriver(Node):
 
         self.previousRank = None
 
-        self.get_logger().info('Chess Driver Initialized. Ready to call /chess/move, /chess/reset, /chess/take, /chess/align')
-        self.get_logger().info(f'The Host IP should be: {self.get_ip_address()} with port 9090')
+        self.get_logger().info('Chess Driver Initialized. Ready to call /chess/move, /chess/reset, /chess/take, /chess/align, /chess/promote, /chess/enpassant, or /chess/castle')
+        self.get_logger().info(f'The ROS Bridge (if running) Host IP should be: {self.get_ip_address()} with port 9090')
 
+
+    # =========================================================
+    # Main Service Callbacks
+    # =========================================================
+
+    def reset_callback(self, request, response):
+        self.get_logger().info("Executing Reset Sequence...")
+
+        if not self.gripper_reset_position(response):
+            return response
+
+        if not self.align_to_table(response):
+            return response
+
+        if self.align_heading_to_table(response):
+            response.message = "Reset and alignment complete."
+            response.success = True
+        return response
+    
+    def move_callback(self, request, response):
+
+        self.get_logger().info('Request received for a move...')
+
+        # TODO Input validation?
+        
+        if self.move(response, request.start_file, request.start_rank, request.end_file, request.end_rank, request.start_piece):
+            response.message = f"Successfully moved piece."
+            response.success = True
+        return response
+    
+    def promote_callback(self, request, response):
+
+        # TODO DOES THIS WORK? I DON'T KNOW
+
+        self.get_logger().info('Promote received for a move...')
+
+        if self.remove_piece(response, request.start_file, request.start_rank, request.start_piece) is False:
+            return response
+
+        if request.end_piece != 'empty':
+            if self.remove_piece(response, request.end_file, request.end_rank, request.end_piece) is False:
+                return response
+
+        if self.move(response, request.promo_file, request.promo_rank, request.end_file, request.end_rank, request.promote_piece) is False:
+            return response
+
+        response.message = f"Successfully promoted piece."
+        response.success = True
+        return response
+    
+    def castle_callback(self, request, response):
+
+        self.get_logger().info('Castle received for a move...')
+
+        if self.move(response, request.start_file_k, request.start_rank_k, request.end_file_k, request.end_rank_k, request.king_piece) is False:
+            return response
+        
+        if self.move(response, request.start_file_r, request.start_rank_r, request.end_file_r, request.end_rank_r, request.rook_piece):
+            response.message = f"Successfully castled piece."
+            response.success = True
+            
+        return response
+    
+    def enpassant_callback(self, request, response):
+
+        self.get_logger().info('EnPassant received for a move...')
+
+        if self.remove_piece(response, request.file_l, request.rank_l, request.lose_pawn) is False:
+            return response
+        
+        if self.move(response, request.start_file_w, request.start_rank_w, request.end_file_w, request.end_rank_w, request.win_pawn):
+            response.message = f"Successfully EnPassant piece."
+            response.success = True
+            
+        return response
+    
+    def align_callback(self, request, response):
+        self.get_logger().info("Align...")
+
+        if self.move_to_square(request.file, request.rank, response) is True:
+            response.message = "Aligned to square"
+        return response
+    
+    def take_callback(self, request, response):
+
+        self.get_logger().info('Request received for a take...')
+
+        if self.remove_piece(response, request.end_file, request.end_rank, request.end_piece) is False:
+            return response
+
+        if self.move(response, request.start_file, request.start_rank, request.end_file, request.end_rank, request.start_piece):
+            response.message = f"Successfully moved piece."
+            response.success = True
+        return response
+    
     # =========================================================
     # Callbacks & Helpers
     # =========================================================
@@ -198,7 +295,7 @@ class ChessDriver(Node):
         cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
         return math.atan2(siny_cosp, cosy_cosp)
     
-    def align_heading_to_table(self):
+    def align_heading_to_table(self, response):
         """
         Reads the orientation of a visible rank marker and rotates the base to perfectly square up.
         """
@@ -210,8 +307,7 @@ class ChessDriver(Node):
             
             marker_t = self.get_visible_rank_transform()
             if marker_t is None:
-                self.get_logger().error("Lost sight of markers. Cannot align heading.")
-                return False
+                return self.fail(response, "Lost sight of markers. Cannot align heading.")
                 
             # Extract the yaw error from the marker's orientation
             q = marker_t.transform.rotation
@@ -238,8 +334,14 @@ class ChessDriver(Node):
                 duration_sec=3.0
             )
             
-        self.get_logger().warning("Failed to perfectly align heading within max attempts, but close enough.")
-        return True # Return true anyway so the sequence doesn't entirely fail
+        return self.fail(response, "Failed to align heading to table.")
+    
+
+    def fail(self, response, msg):
+        self.get_logger().error(msg)
+        response.message = msg
+        response.success = False
+        return False
 
     def execute_trajectory(self, joint_names, positions, duration_sec):
         """
@@ -313,30 +415,18 @@ class ChessDriver(Node):
                 return t
         return None
 
-    # =========================================================
-    # Main Service Routine
-    # =========================================================
-
-    def reset_callback(self, request, response):
-        self.get_logger().info("Executing Reset Sequence...")
-        
-        # Step 1: Retract, Lift, Orient Wrist
-        success = self.execute_trajectory(
-            ['joint_lift', 'wrist_extension', 'joint_wrist_yaw', 'joint_wrist_pitch', 'joint_gripper_finger_left'],
-            [self.LIFT_TOP, self.WRIST_EXTENSION_RESET, self.WRIST_YAW_NORMAL, self.WRIST_PITCH_NORMAL, self.GRIPPER_OPEN],
-            duration_sec=6.0
-        )
-
-        if not success:
-            response.message = "Failed during arm reset."
-            response.success = False
-            return response
-
+    def align_to_table(self, response):
+        # reset wrist
         self.force_reset_wrist()
 
         # Step 2: Handle Table Clearance
         marker_t = self.get_visible_rank_transform()
+
         odd = 1
+        # if we know which direction will hit the table, do the opposite
+        if self.previousRank is not None:
+            if self.previousRank < 5:
+                odd = -1
         
         # If we are totally blind, back up in standard increments until we see the table
         while marker_t is None:
@@ -344,7 +434,7 @@ class ChessDriver(Node):
             if self.backup_from_table(odd) is False:
                 response.message = "Failed during blind back away."
                 response.success = False
-                return response
+                return False
             odd *= -1
             marker_t = self.get_visible_rank_transform()
 
@@ -353,7 +443,7 @@ class ChessDriver(Node):
         current_y_dist = abs(marker_t.transform.translation.y)
         delta_dist = self.SAFE_TABLE_CLEARANCE - current_y_dist
         
-        if delta_dist > 0.02: # Only trigger if we are more than 2cm too close
+        if delta_dist > self.TABLE_DISTANCE_ERROR_ALLOWED: # Only trigger if we are more than 2cm too close
             self.get_logger().info(f"Currently {current_y_dist:.3f}m from table. Need {self.SAFE_TABLE_CLEARANCE}m.")
             
             # Apply trigonometry: hypotenuse = opposite / sin(theta)
@@ -367,74 +457,11 @@ class ChessDriver(Node):
             if self.backup_from_table(odd=1, calculated_distance=calc_trans) is False:
                 response.message = "Failed during precision back away."
                 response.success = False
-                return response
+                return False
         else:
             self.get_logger().info("Robot is already at a safe distance from the table.")
-
-        # --- NEW: Step 3: Square up the heading ---
-        if not self.align_heading_to_table():
-             response.message = "Reset complete, but failed to square up heading."
-             response.success = False
-             return response
-
-        response.message = "Reset and alignment complete."
-        response.success = True
-        return response
-
-    def move_callback(self, request, response):
-
-        self.get_logger().info('Request received for a move...')
-
-        # TODO Input validation?
         
-        if self.move(response, request.start_file, request.start_rank, request.end_file, request.end_rank, request.start_piece):
-            response.message = f"Successfully moved piece."
-            response.success = True
-        return response
-    
-    def promote_callback(self, request, response):
-
-        self.get_logger().info('Promote received for a move...')
-
-        if self.remove_piece(response, request.start_file, request.start_rank, request.start_piece) is False:
-            return response
-
-        if request.end_piece != 'empty':
-            if self.remove_piece(response, request.end_file, request.end_rank, request.end_piece) is False:
-                return response
-
-        if self.move(response, request.promo_file, request.promo_rank, request.end_file, request.end_rank, request.promote_piece) is False:
-            return response
-
-        response.message = f"Successfully promoted piece."
-        response.success = True
-        return response
-    
-    def castle_callback(self, request, response):
-
-        self.get_logger().info('Castle received for a move...')
-
-        if self.move(response, request.start_file_k, request.start_rank_k, request.end_file_k, request.end_rank_k, request.king_piece) is False:
-            return response
-        
-        if self.move(response, request.start_file_r, request.start_rank_r, request.end_file_r, request.end_rank_r, request.rook_piece):
-            response.message = f"Successfully castled piece."
-            response.success = True
-            
-        return response
-    
-    def enpassant_callback(self, request, response):
-
-        self.get_logger().info('EnPassant received for a move...')
-
-        if self.remove_piece(response, request.file_l, request.rank_l, request.lose_pawn) is False:
-            return response
-        
-        if self.move(response, request.start_file_w, request.start_rank_w, request.end_file_w, request.end_rank_w, request.win_pawn):
-            response.message = f"Successfully EnPassant piece."
-            response.success = True
-            
-        return response
+        return True
     
     def move(self, response, start_file, start_rank, end_file, end_rank, piece):
         if self.move_to_square(start_file, start_rank, response=response) is False:
@@ -512,19 +539,6 @@ class ChessDriver(Node):
         self.get_logger().info("Successfully completed backup maneuver.")
         return True
 
-    
-    def take_callback(self, request, response):
-
-        self.get_logger().info('Request received for a take...')
-
-        if self.remove_piece(response, request.end_file, request.end_rank, request.end_piece) is False:
-            return response
-
-        if self.move(response, request.start_file, request.start_rank, request.end_file, request.end_rank, request.start_piece):
-            response.message = f"Successfully moved piece."
-            response.success = True
-        return response
-
     def open_gripper(self, response):
         self.get_logger().info("Opening gripper...")
         success = self.execute_trajectory(
@@ -567,10 +581,8 @@ class ChessDriver(Node):
 
         s2 = self.force_reset_wrist()
 
-
         if not s1 or not s2:
-            response.message = "Gripper failed to go into reset position."
-            response.success = False
+            self.fail(response, "Gripper failed to go into reset position.")
         
         return s1 and s2
     
@@ -729,16 +741,6 @@ class ChessDriver(Node):
             return False
         
         return True
-
-
-    def align_callback(self, request, response):
-        self.get_logger().info("Align...")
-
-        if self.move_to_square(request.file, request.rank, response) is True:
-            response.message = "Aligned to square"
-        return response
-
-
     
     def move_to_square(self, target_file, target_rank, response):
 
