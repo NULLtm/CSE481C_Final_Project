@@ -638,6 +638,60 @@
       margin-bottom: 24px;
       text-transform: capitalize;
     }
+
+    /* Promotion Modal Styles */
+    #promotion-modal {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+
+    #promotion-modal.hidden {
+      display: none;
+    }
+
+    .promotion-content {
+      background: var(--surface);
+      padding: 24px;
+      border-radius: var(--radius);
+      text-align: center;
+      color: var(--text-primary);
+      box-shadow: var(--shadow);
+      border: 1px solid var(--accent);
+    }
+
+    .promotion-pieces {
+      display: flex;
+      gap: 16px;
+      margin: 20px 0;
+    }
+
+    .promotion-piece {
+      width: 60px;
+      height: 60px;
+      cursor: pointer;
+      border-radius: 8px;
+      transition: background 0.2s, transform 0.1s;
+    }
+
+    .promotion-piece:hover {
+      background: var(--accent);
+      transform: scale(1.05);
+    }
+
+    #promo-cancel {
+      background: #333;
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    #promo-cancel:hover { background: #555; }
   </style>
 </head>
 <body>
@@ -689,6 +743,14 @@
 
     <div class="board-wrapper">
       <div id="board"></div>
+      <div id="promotion-modal" class="hidden">
+        <div class="promotion-content">
+          <h3>Promote Pawn</h3>
+          <div class="promotion-pieces" id="promo-pieces">
+            </div>
+          <button id="promo-cancel" class="btn">Cancel</button>
+        </div>
+      </div>
       <div id="boardOverlay" class="board-overlay">Robot is moving...</div>
     </div>
 
@@ -761,6 +823,7 @@
   let selectedSquare = null;
   let moveNumber = 1;
   let pendingMove = null; // cleared on every server response; guards against stale state
+  let pendingPromotionMove = null;
 
   // Tracks which promotion piece types still have spare physical pieces,
   // keyed by color ('w'/'b') then piece type ('q'/'n').
@@ -1094,20 +1157,34 @@
       selectPiece(source);
     },
 
-    onDrop: function (source, target) {
+    onDrop: function (source, target, piece) {
       // If dropped on the same square, let handleSquareClick manage click-to-move
       if (source === target) return; 
 
-      // Check if move is locally valid using chess.js before sending to server
       const legalMoves = chess.moves({ verbose: true });
+      
+      // 1. Check if the attempted move is a promotion
+      const isPromotion = legalMoves.some(m => m.from === source && m.to === target && m.promotion);
+
+      if (isPromotion) {
+        // Save the details and show the GUI
+        pendingPromotionMove = { source, target, color: piece.charAt(0) };
+        showPromotionModal(piece.charAt(0));
+        
+        // Snap the piece back for now. The server will update the board 
+        // with the new FEN once the user selects a piece and sendMove() is called.
+        return 'snapback'; 
+      }
+
+      // 2. Normal move validation
       const isValid = legalMoves.some(m => m.from === source && m.to === target);
 
       if (!isValid) {
         clearSelection();
-        return 'snapback'; // Invalid move, snap piece back
+        return 'snapback'; 
       }
 
-      // Move is valid, send to server
+      // Move is valid and not a promotion, send to server
       sendMove(source, target);
       clearSelection();
     },
@@ -1123,6 +1200,62 @@
     select: 'Tap or drag a piece to move.',
     voice:  'Tap mic → say "e2 to e4" → tap to stop.',
   };
+
+  // =========================================================================
+  // Promotion GUI Logic
+  // =========================================================================
+  
+  function showPromotionModal(color) {
+    const $pieces = $('#promo-pieces');
+    $pieces.empty();
+
+    const pieces = ['q', 'n', 'r', 'b'];
+    const pool = availablePromotions[color] || {};
+
+    pieces.forEach(p => {
+      // e.g., 'w' + 'Q' = 'wQ'
+      const pieceCode = color + p.toUpperCase(); 
+      const imgUrl = `https://lichess1.org/assets/piece/cburnett/${pieceCode}.svg`;
+      
+      // Enforce physical constraints: r and b are never available. q and n depend on the pool.
+      let isAvailable = false;
+      if (p === 'q' || p === 'n') {
+        isAvailable = pool[p] !== false;
+      }
+
+      const $img = $(`<img src="${imgUrl}" class="promotion-piece" data-piece="${p}" alt="${pieceCode}"/>`);
+      
+      if (!isAvailable) {
+        $img.addClass('disabled').attr('title', 'No physical spare pieces available for the robot');
+      } else {
+        $img.on('click', () => handlePromotionSelection(p));
+      }
+      
+      $pieces.append($img);
+    });
+
+    $('#promotion-modal').removeClass('hidden');
+  }
+
+  function handlePromotionSelection(promotedPiece) {
+    $('#promotion-modal').addClass('hidden');
+    if (!pendingPromotionMove) return;
+
+    const { source, target } = pendingPromotionMove;
+    pendingPromotionMove = null;
+
+    // Call your existing sendMove function with the chosen piece!
+    // The server will validate, broadcast the new FEN, and your 
+    // WebSocket listener will automatically snap the new piece into place.
+    sendMove(source, target, promotedPiece);
+    clearSelection();
+  }
+
+  $('#promo-cancel').on('click', () => {
+    $('#promotion-modal').addClass('hidden');
+    pendingPromotionMove = null;
+    clearSelection();
+  });
 
   function switchMode(mode) {
     currentMode = mode;
