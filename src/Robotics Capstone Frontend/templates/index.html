@@ -1293,27 +1293,63 @@
   });
 
   function handleSquareClick(square) {
-    if (isBoardLocked) return; // Ignore clicks if waiting for server
+    // 1. Prevent clicks if the board is locked or not in select mode
+    if (isBoardLocked || currentMode !== 'select' || !socket || socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
 
-    const pos = board.position();
-    const isOwnPiece = pos[square] && pos[square][0] === chess.turn();
+    // 2. If no square is currently selected, select the clicked piece (if it's their turn)
+    if (!selectedSquare) {
+      const piece = chess.get(square);
+      if (piece && piece.color === chess.turn()) {
+        selectedSquare = square;
+        // Assuming you have a function that highlights the square/legal moves:
+        selectPiece(square); 
+      }
+      return;
+    }
 
-    if (selectedSquare === null) {
-      // First click: select if it's our piece
-      if (!isOwnPiece) return;
-      selectPiece(square);
+    // 3. If a square is already selected, they are attempting to move
+    const source = selectedSquare;
+    const target = square;
+    
+    // Get the piece so we know its color for the promotion modal
+    const piece = chess.get(source);
+
+    // If they clicked the same square, cancel the selection
+    if (source === target) {
+      clearSelection();
+      return;
+    }
+
+    const legalMoves = chess.moves({ verbose: true });
+    
+    // --- NEW: PROMOTION CHECK ---
+    const isPromotion = legalMoves.some(m => m.from === source && m.to === target && m.promotion);
+
+    if (isPromotion) {
+      pendingPromotionMove = { source, target, color: piece.color };
+      showPromotionModal(piece.color);
+      clearSelection(); // Clear the highlighted squares while the modal is open
+      return; // Stop execution here until the user clicks a modal button
+    }
+    // ----------------------------
+
+    // --- Normal Move Validation ---
+    const isValid = legalMoves.some(m => m.from === source && m.to === target);
+
+    if (isValid) {
+      // Valid normal move! Send it.
+      sendMove(source, target);
+      clearSelection();
     } else {
-      // Second click
-      if (square === selectedSquare) {
-        // Tapped the same piece again -> deselect
-        clearSelection();
-      } else if (isOwnPiece) {
-        // Tapped another of our own pieces -> switch selection
-        clearSelection();
-        selectPiece(square);
+      // If they clicked an invalid square, either clear the selection 
+      // or see if they clicked another one of their own pieces.
+      const clickedPiece = chess.get(target);
+      if (clickedPiece && clickedPiece.color === chess.turn()) {
+        selectedSquare = target;
+        selectPiece(target);
       } else {
-        // Tapped an empty square or enemy piece -> attempt move
-        sendMove(selectedSquare, square);
         clearSelection();
       }
     }
