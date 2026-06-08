@@ -37,10 +37,6 @@ class ChessDriver(Node):
     # TODO add promotion
     # TODO Make lift grab height use aruco markers?
     # TODO Look for speed ups?
-    # TODO Make a system for the robot backing up from the table if needed
-    # TODO If the robot cannot see any ranks for rank adjustment then backup?
-    # TODO For file/rank adjustment use other rank / file markers with an offset?
-    # TODO detect and auto align to the table if needed during moving
     # TODO switch the force reset wrist to use aruco markers instead of hitting 0.0 + error?
     # TODO Robot slowly approaches the table over time and also starts to rotate slightly due to droop of the arm
 
@@ -66,6 +62,7 @@ class ChessDriver(Node):
     WRIST_RETRACTION_ERROR = 0.04
 
     ONE_RANK_DISTANCE = 0.071
+    ONE_FILE_DISTANCE = 0.069
 
     RANK_ADJUSTMENT_OFFSET = -0.005
     FILE_ADJUSTMENT_OFFSET = 0.034
@@ -566,9 +563,8 @@ class ChessDriver(Node):
         )
 
         if not success1 or not success2:
-            response.message = "Robot failed to go into discard position."
-            response.success = False
-        return success1
+            return self.fail(response, "Gripper failed to go into discard position.")
+        return True
     
     def gripper_reset_position(self, response):
         self.get_logger().info("Reset positioning gripper...")
@@ -645,8 +641,7 @@ class ChessDriver(Node):
         if not self.open_gripper(response):
             return False
         
-        time.sleep(1)
-        
+        # TODO Should this be controlled by aruco markers?
         if not self.lift_lower(response, self.LIFT_ADJUST_HEIGHT):
             return False
         
@@ -677,7 +672,7 @@ class ChessDriver(Node):
             duration_sec=3.0
         )
 
-        time.sleep(1)
+        time.sleep(0.5)
 
         # 2. Calculate the midpoint of the two fingertip markers along the Y-axis
         mid_y = (trans_left.transform.translation.y + trans_right.transform.translation.y) / 2.0
@@ -709,7 +704,7 @@ class ChessDriver(Node):
         if not self.lift_lower(response, self.LIFT_PICKUP_HEIGHT):
             return False
         
-        time.sleep(2)
+        time.sleep(1)
         
         if not self.close_gripper(response):
             return False
@@ -745,16 +740,20 @@ class ChessDriver(Node):
     def move_to_square(self, target_file, target_rank, response):
 
         file = "File" + target_file.upper()
+        file_suffix = ""
 
         off_by_one_rank_offset = 0.0
         rank = ""
         if target_rank == 'WhitePromo' or target_rank == 'BlackPromo':
             off_by_one_rank_offset = self.ONE_RANK_DISTANCE / 2.0
+            file_suffix = target_rank[0]
         else:
             if int(target_rank) >= 5:
                 file += "B"
+                file_suffix = "B"
             else:
                 file += "W"
+                file_suffix = "W"
 
             rank = "Rank" + target_rank + "W"
 
@@ -775,11 +774,15 @@ class ChessDriver(Node):
             )
         
         if self.force_reset_wrist() is False:
-            self.get_logger().info('Force write movement failed!')
-            response.message = "Reset before move failed."
-            response.success = False
-            return False
+            return self.fail(response, "Reset wrist before move failed.")
+        
+        self.get_logger().info(f"Heading adjustment...")
 
+        if self.align_heading_to_table(response) is False:
+            # if heading adjustment fails, try align to table
+            if self.align_to_table(response) is False:
+                return False
+            
         self.get_logger().info(f"Rank adjustment...")
         # --- BASE ALIGNMENT LOOP (RANK) ---
         base_aligned = False
@@ -821,59 +824,81 @@ class ChessDriver(Node):
             )
             
         if not base_aligned:
-            self.get_logger().info(f'FAILED TO ALIGN BASE FOR RANK')
-            response.message = "Failed to precisely align base within iterations."
-            response.success = False
-            return False
+            return self.fail(response, "Failed to precisely align base to rank within iterations.")
         
         self.previousRank = int(target_rank)
         
         # --- ARM EXTENSION LOOP (FILE) ---
         arm_aligned = False
-        # heuristic first
+
+        # Heuristic first
         index = self.get_file_index(file)
-
-        # TODO fix the adjustments for the File
-
         self.execute_trajectory(['wrist_extension'], [(index + 0.1) * self.ONE_RANK_DISTANCE], duration_sec=5.0)
 
-        time.sleep(2)
+        time.sleep(1)
+        
+        # 1. Build the search sequence (Target first, then closest neighbors alternating outward)
+        target_index = index
+        search_sequence = []
+        target_file_letter = target_file.upper()
+        
+        for d in range(8):
+            if d == 0:
+                search_sequence.append(target_file_letter)
+            else:
+                # Add left neighbor
+                if target_index - d >= 0:
+                    search_sequence.append(chr(ord('A') + target_index - d))
+                # Add right neighbor
+                if target_index + d < 8:
+                    search_sequence.append(chr(ord('A') + target_index + d))
+                    
+        # Determine the file suffix so we can accurately look up fallback names
         
         for attempt in range(5):
             time.sleep(1)
             
-            t = self.get_marker_transform(file, "gripper_camera_color_optical_frame")
-            if t is None:
-                response.message = f"Lost sight of {file} during arm extension."
-                response.success = False
-                return False
-                
-            # DEPENDING ON YOUR CAMERA FRAME, THIS MIGHT BE .x OR .y OR .z
-            # Measure how far the marker is from the arm's extension axis
-            error_y = t.transform.translation.y + self.FILE_ADJUSTMENT_OFFSET
-
-            self.get_logger().info(f'error for the lift {error_y}')
+            t = None
+            found_letter = None
             
-            if abs(error_y) < self.FILE_ERROR_ALLOWED: # 2cm tolerance
+            # 2. Iterate through our prioritized sequence looking for any visible file
+            for letter in search_sequence:
+                test_file = f"File{letter}{file_suffix}"
+                t = self.get_marker_transform(test_file, "gripper_camera_color_optical_frame")
+                if t is not None:
+                    found_letter = letter
+                    break
+            
+            if t is None:
+                return self.fail(response, "Lost sight of all files during arm extension.")
+                
+            # 3. Calculate distance offset between the target file and the actual found file
+            found_index = ord(found_letter) - ord('A')
+            # TODO This might be the opposite direction
+            distance_offset = (target_index - found_index) * self.ONE_FILE_DISTANCE
+
+            # 4. Add the calculated offset to the normal error
+            error_y = t.transform.translation.y + self.FILE_ADJUSTMENT_OFFSET + distance_offset
+
+            self.get_logger().info(f'Error for the wrist extension {error_y} (Target: {target_file_letter}, Found: {found_letter})')
+            
+            if abs(error_y) < self.FILE_ERROR_ALLOWED:
                 self.get_logger().info("Arm successfully aligned to File!")
                 arm_aligned = True
                 break
 
-            current_ext = self.get_wrist_position()                
-            self.get_logger().info(f'current wrist extension is {current_ext}')
+            current_ext = self.get_wrist_position()
+            self.get_logger().info(f'Current wrist extension is {current_ext}')
 
-            target_ext =  error_y + current_ext
+            target_ext = error_y + current_ext
 
-            self.get_logger().info(f'target ext is {target_ext}')
+            self.get_logger().info(f'Target ext is {target_ext}')
             
             self.get_logger().info(f"Fine-tuning arm extension to {target_ext:.3f}m")
             self.execute_trajectory(['wrist_extension'], [target_ext], duration_sec=5.0)
             
         if not arm_aligned:
-            self.get_logger().info(f'FAILED TO ALIGN ARM')
-            response.message = "Failed to align arm properly."
-            response.success = False
-            return False
+            return self.fail(response, "Failed to align arm properly to file.")
         
         self.get_logger().info("Move completed...")
         return True
