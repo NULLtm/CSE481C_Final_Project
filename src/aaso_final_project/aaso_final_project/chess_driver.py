@@ -79,7 +79,7 @@ class ChessDriver(Node):
 
     SAFE_TABLE_CLEARANCE = 0.19
     TABLE_DISTANCE_ERROR_ALLOWED = 0.02
-    HEADING_ERROR_ALLOWED = 0.03
+    HEADING_ERROR_ALLOWED = 0.04
     HEADING_OFFSET = 0.1 # larger = more to the right?
 
 
@@ -299,17 +299,20 @@ class ChessDriver(Node):
         Reads the orientation of a visible rank marker and rotates the base to perfectly square up.
         """
         self.get_logger().info("Squaring up base heading with the table...")
+
+        cur = None
         
         # We give it a couple of attempts to fine-tune, similar to your rank alignment
         for attempt in range(3):
             time.sleep(1.0) # Let camera and TF settle
-            
-            marker_t = self.get_visible_rank_transform()
-            if marker_t is None:
+
+            if cur is None:
+                _, cur = self.get_visible_rank_transform()
+            if cur is None:
                 return self.fail(response, "Lost sight of markers. Cannot align heading.")
                 
             # Extract the yaw error from the marker's orientation
-            q = marker_t.transform.rotation
+            q = self.get_marker_transform(cur, "base_link").transform.rotation
             yaw_error = self.get_yaw_from_quaternion(q) + math.pi / 2 + self.HEADING_OFFSET
             
             # Note: Depending on exactly how your ArUco markers are defined in the TF tree, 
@@ -411,7 +414,13 @@ class ChessDriver(Node):
             t = self.get_marker_transform(test_frame, "base_link")
             if t is not None:
                 self.get_logger().info(f'{test_frame} was found.')
-                return t
+                return (t, test_frame)
+        
+        for i in ("WhitePromo", "BlackPromo"):
+            t = self.get_marker_transform(i, "base_link")
+            if t is not None:
+                self.get_logger().info(f'{i} was found.')
+                return (t, i)
         return None
 
     def align_to_table(self, response):
@@ -419,7 +428,7 @@ class ChessDriver(Node):
         self.force_reset_wrist()
 
         # Step 2: Handle Table Clearance
-        marker_t = self.get_visible_rank_transform()
+        _, marker_t = self.get_visible_rank_transform()
 
         odd = 1
         # if we know which direction will hit the table, do the opposite
@@ -435,7 +444,7 @@ class ChessDriver(Node):
                 response.success = False
                 return False
             odd *= -1
-            marker_t = self.get_visible_rank_transform()
+            _, marker_t = self.get_visible_rank_transform()
 
         # Now that we see a marker, calculate exactly how much further we need to go
         # The perpendicular distance to the table is roughly the Y-axis value of the marker
@@ -739,6 +748,14 @@ class ChessDriver(Node):
         
         return True
     
+
+    def rank_to_int(self, target_rank):
+        if target_rank == 'WhitePromo':
+            return 0
+        if target_rank == 'BlackPromo':
+            return 9
+        return int(target_rank)
+    
     def move_to_square(self, target_file, target_rank, response):
 
         file = "File" + target_file.upper()
@@ -749,6 +766,7 @@ class ChessDriver(Node):
         if target_rank == 'WhitePromo' or target_rank == 'BlackPromo':
             off_by_one_rank_offset = self.ONE_RANK_DISTANCE / 2.0
             file_suffix = target_rank[0]
+            rank = target_rank
         else:
             if int(target_rank) >= 5:
                 file += "B"
@@ -771,7 +789,7 @@ class ChessDriver(Node):
             cur = self.current_joint_states.get('translate_mobile_base', 0.0)
             setup = self.execute_trajectory(
                 ['translate_mobile_base'],
-                [(int(target_rank) - self.previousRank) * self.ONE_RANK_DISTANCE + cur],
+                [(self.rank_to_int(target_rank) - self.previousRank) * self.ONE_RANK_DISTANCE + cur],
                 duration_sec=7.0
             )
         
@@ -788,26 +806,63 @@ class ChessDriver(Node):
         self.get_logger().info(f"Rank adjustment...")
         # --- BASE ALIGNMENT LOOP (RANK) ---
         base_aligned = False
-        for attempt in range(4):  # Max 5 iterations to prevent infinite loops
+        for attempt in range(6):  # Max 6 iterations to prevent infinite loops
             time.sleep(1.0) # Let the camera and TF buffer catch up after moving
             
             t = self.get_marker_transform(rank, "base_link")
             
             if t is None:
-                self.get_logger().info(f"Target '{rank}' not visible. Hopping to closest rank...")
+                self.get_logger().info(f"Target '{rank}' not visible. Searching for closest visible rank...")
 
-                # Move towards the visible rank just to get closer
-                t_temp = self.get_marker_transform("Rank5W", "base_link")
-                dx = t_temp.transform.translation.x
+                # 1. Determine an integer index for the target rank to find nearest neighbors
+                if rank.startswith("Rank"):
+                    target_idx = int(rank.replace("Rank", "").replace("W", ""))
+                elif rank == "WhitePromo":
+                    target_idx = 0  # Below rank 1
+                elif rank == "BlackPromo":
+                    target_idx = 9  # Above rank 8
+                else:
+                    target_idx = 4  # Safe fallback
+
+                # 2. Sort ranks 1-7 by closest distance to target_idx
+                search_ranks = sorted([1, 2, 3, 4, 5, 6, 7], key=lambda r: abs(r - target_idx))
+                
+                t_temp = None
+                visible_rank_num = None
+                
+                # 3. Find the closest visible rank
+                for r in search_ranks:
+                    test_rank_name = f"Rank{r}W"
+                    t_temp = self.get_marker_transform(test_rank_name, "base_link")
+                    if t_temp is not None:
+                        visible_rank_num = r
+                        break
+                
+                if t_temp is None:
+                    return self.fail(response, "Lost sight of all ranks during base alignment.")
+                    
+                self.get_logger().info(f"Found {test_rank_name}. Hopping relative to it...")
+
+                # 4. Calculate distance offset between our target and the rank we actually see
+                distance_offset = (target_idx - visible_rank_num) * self.ONE_RANK_DISTANCE
+                
+                # 5. Move to where the target SHOULD be, based on what we see right now
+                # We align with the visible rank, then add the jump to the target rank, plus the Promo/Rank8 offset
+                dx = t_temp.transform.translation.x - self.RANK_ADJUSTMENT_OFFSET + distance_offset + off_by_one_rank_offset
+                
                 cur = self.current_joint_states.get('translate_mobile_base', 0.0)
-                # Optional: offset slightly so we don't crash into the visible rank
                 self.execute_trajectory(
                     ['translate_mobile_base'],
                     [dx + cur],
                     duration_sec=5.0
                 )
-                time.sleep(0.5)
-                continue # Loop again and try to find the real target
+                time.sleep(1.0) # Wait a bit longer after a large hop
+                
+                # 6. Re-align heading after the large jump as requested
+                self.get_logger().info("Re-aligning heading after hop...")
+                self.align_heading_to_table(response)
+                
+                continue # Loop again and try to find the real target (no nested attempts for the fallback!)
                 
             # The target IS visible! Fine-tune the approach.
             error_x = t.transform.translation.x - self.RANK_ADJUSTMENT_OFFSET + off_by_one_rank_offset
@@ -828,7 +883,7 @@ class ChessDriver(Node):
         if not base_aligned:
             return self.fail(response, "Failed to precisely align base to rank within iterations.")
         
-        self.previousRank = int(target_rank)
+        self.previousRank = self.rank_to_int(target_rank)
 
         if self.align_heading_to_table(response) is False:
             return False
